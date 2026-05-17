@@ -4,22 +4,21 @@ app_publisher = "Asif"
 app_description = "Production-grade spreadsheet for Frappe"
 app_email = "asif@frappe.io"
 app_license = "mit"
+app_logo_url = "/assets/frappe_sheets_next/logo.svg"
 
 # Apps
 # ------------------
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "frappe_sheets_next",
-# 		"logo": "/assets/frappe_sheets_next/logo.png",
-# 		"title": "Sheets",
-# 		"route": "/frappe_sheets_next",
-# 		"has_permission": "frappe_sheets_next.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "frappe_sheets_next",
+		"logo": "/assets/frappe_sheets_next/logo.svg",
+		"title": "Sheets",
+		"route": "/frappe_sheets_next",
+	}
+]
 
 # Includes in <head>
 # ------------------
@@ -40,7 +39,7 @@ app_license = "mit"
 # webform_include_css = {"doctype": "public/css/doctype.css"}
 
 # include js in page
-# page_js = {"page" : "public/js/file.js"}
+# page_js = {"sheets-next": "public/js/sheets.js"}
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}

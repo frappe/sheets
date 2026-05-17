@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="160" viewBox="0 0 520 160" fill="none">
+  
+  
+  <g transform="translate(16,16)">
+    <rect width="128" height="128" rx="30" fill="#0E7490"></rect>
+    <g stroke="white" stroke-opacity="0.18" stroke-width="1" stroke-linecap="round">
+      <line x1="42.5" y1="16" x2="42.5" y2="112"></line>
+      <line x1="85.5" y1="16" x2="85.5" y2="112"></line>
+      <line x1="16" y1="42.5" x2="112" y2="42.5"></line>
+      <line x1="16" y1="85.5" x2="112" y2="85.5"></line>
+    </g>
+    <polyline points="24,90 48,74 68,82 92,40 108,54" fill="none" stroke="#A5F0FA" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"></polyline>
+    <circle cx="68" cy="82" r="5.5" fill="white"></circle>
+    <circle cx="92" cy="40" r="5.5" fill="white"></circle>
+  </g>
+  
+  <g transform="translate(170,0)" font-family="Geist, Inter, -apple-system, Segoe UI, sans-serif">
+    <text x="0" y="92" font-size="68" font-weight="600" fill="#0E7490" letter-spacing="-2">Sheets</text>
+    <text x="2" y="124" font-size="22" font-weight="400" fill="#0E7490" opacity="0.7">by Frappe</text>
+  </g>
+</svg>

@@ -1,0 +1,14 @@
+@import 'frappe-ui/style.css';
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  font-family: InterVar, ui-sans-serif, system-ui, sans-serif;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variation-settings: 'opsz' 24, 'cv11' 1;
+  overflow: hidden;
+}

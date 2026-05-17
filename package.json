@@ -1,0 +1,8 @@
+{
+  "name": "frappe_sheets_next",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "vue": "^3.4.0"
+  }
+}
