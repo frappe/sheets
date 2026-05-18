@@ -32,7 +32,15 @@
           @blur="onTitleBlur"
         />
         <!-- Save status: only shown for new unsaved docs or on error -->
-        <Badge v-if="props.id === 'new' && isDirty" theme="orange" variant="subtle" size="sm" label="Unsaved" />
+        <Badge
+          v-if="props.id === 'new' && isDirty"
+          theme="red"
+          variant="solid"
+          size="md"
+          label="UNSAVED — CLICK SAVE"
+          class="sn-unsaved-cta"
+          @click="onSave"
+        />
         <Badge v-else-if="isSaving"                 theme="gray"   variant="subtle" size="sm" label="Saving…" />
         <Badge v-else-if="justSaved"                theme="green"  variant="subtle" size="sm" label="Saved" />
         <Badge v-if="saveError" theme="red" variant="subtle" size="sm" :label="saveError" :tooltip="saveError" />
@@ -2021,6 +2029,11 @@ function toggleShowFormulas() {
 .sn-app-icon-btn:focus-visible { outline:2px solid var(--outline-gray-4); outline-offset:2px; }
 
 .sn-title-input { height:28px; border:1px solid transparent; border-radius:6px; padding:0 8px; font-size:14px; font-weight:500; color:var(--ink-gray-9); background:transparent; outline:none; font-family:inherit; letter-spacing:.01em; transition:background-color .12s, border-color .12s, width .1s; }
+
+/* Unsaved-doc CTA — louder than the old subtle orange chip. Clickable; opens
+   the Save dialog. */
+.sn-unsaved-cta { cursor:pointer; letter-spacing:.04em; font-weight:600; }
+.sn-unsaved-cta:hover { filter:brightness(1.05); }
 .sn-title-input:hover { background:var(--surface-gray-2); }
 .sn-title-input:focus { border-color:var(--outline-gray-4); background:var(--surface-white); box-shadow:0 0 0 2px rgba(23,23,23,.10); }
 

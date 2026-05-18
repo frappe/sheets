@@ -3,8 +3,8 @@ name = "frappe_sheets_next"
 authors = [
     { name = "Asif", email = "asif@frappe.io"}
 ]
-description = "Production-grade spreadsheet for Frappe"
-requires-python = ">=3.14"
+description = "Spreadsheet app for Frappe"
+requires-python = ">=3.11"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
@@ -25,7 +25,7 @@ packages = []
 
 [tool.ruff]
 line-length = 110
-target-version = "py314"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = [

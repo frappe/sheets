@@ -53,3 +53,7 @@ jspm_packages/
 
 # Aider AI Chat
 .aider*
+
+# Internal planning docs (not for distribution)
+.internal/
+frappe_sheets_next/public/node_modules

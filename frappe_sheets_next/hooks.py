@@ -1,7 +1,7 @@
 app_name = "frappe_sheets_next"
 app_title = "Sheets"
 app_publisher = "Asif"
-app_description = "Production-grade spreadsheet for Frappe"
+app_description = "Spreadsheet app for Frappe"
 app_email = "asif@frappe.io"
 app_license = "mit"
 app_logo_url = "/assets/frappe_sheets_next/logo.svg"
