@@ -123,15 +123,21 @@ add_to_apps_screen = [
 
 # Permissions
 # -----------
-# Permissions evaluated in scripted ways
+# Scope the child doctypes (Sheet Op Log, Sheet Snapshot) to sheets the caller
+# can actually read on the parent. Without these hooks, the stock
+# `frappe.client.get_list` would happily return every cell change and every
+# snapshot payload on the site — bypassing the careful `has_permission` gates
+# in the whitelisted API. See sheets/permissions.py.
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"Sheet Op Log": "sheets.permissions.sheet_op_log_query",
+	"Sheet Snapshot": "sheets.permissions.sheet_snapshot_query",
+}
+
+has_permission = {
+	"Sheet Op Log": "sheets.permissions.sheet_op_log_has_permission",
+	"Sheet Snapshot": "sheets.permissions.sheet_snapshot_has_permission",
+}
 
 # Document Events
 # ---------------

@@ -56,8 +56,12 @@ def restore(snapshot_id: str) -> dict:
 
 	Returns: { "snapshot": <new milestone snapshot name>, "seq": int }
 	"""
-	target = at(snapshot_id)  # validates permission
+	target = at(snapshot_id)  # validates read permission
 	sheet_id = target["sheet"]
+	# Authoritative write-perm gate lives here, not at the call-site — so any
+	# future caller (a fixture, a script, another whitelisted endpoint) that
+	# forgets to gate cannot accidentally mutate the head.
+	frappe.has_permission("Sheet", doc=sheet_id, ptype="write", throw=True)
 
 	# Append a restore op so the timeline tells the story.
 	restore_seq = seq_mod.allocate(sheet_id)

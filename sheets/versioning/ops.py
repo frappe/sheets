@@ -17,8 +17,16 @@ that ever removes rows, and it preserves the invariant
 from __future__ import annotations
 
 import json
+import re
 
 import frappe
+
+# Cell ids are spreadsheet-style refs (``A1`` … ``AB123``). Bounding the format
+# stops a caller from passing wildcards / quote-escapes into the SQL `LIKE`
+# pattern below — values are parameterised so injection isn't possible, but an
+# unconstrained pattern would still let a probe like ``%`` match every row
+# and scan the table.
+_CELL_ID_RE = re.compile(r"^[A-Z]{1,3}\d{1,7}$")
 
 
 def between(sheet: str, from_seq: int, to_seq: int, limit: int = 200) -> list[dict]:
@@ -44,6 +52,8 @@ def for_cell(sheet: str, cell_id: str, sub_sheet: str | None = None, limit: int 
 	every op for the sheet — fast even on busy sheets.
 	"""
 	frappe.has_permission("Sheet", doc=sheet, throw=True)
+	if not _CELL_ID_RE.match(cell_id or ""):
+		frappe.throw("Invalid cell id")
 	conditions = ["sheet = %(sheet)s"]
 	params: dict = {"sheet": sheet, "limit": limit}
 	if sub_sheet:

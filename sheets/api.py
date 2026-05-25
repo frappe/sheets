@@ -25,11 +25,25 @@ def ping_presence(name: str) -> None:
 
 
 # ── Real-time collaboration ───────────────────────────────────────────────────
+#
+# Broadcasts split by whether the event represents a mutation or pure presence:
+#
+#   * mutation-shaped events (`broadcast_op`, `yjs_update`, `yjs_state`) require
+#     *write* permission on the sheet — a read-only sharee must not be able to
+#     push ops or full-state dumps that other clients' tabs will apply locally
+#     to their Yjs document, even though those changes can't be persisted
+#     server-side.
+#
+#   * presence-shaped events (`ping_presence`, `broadcast_cursor`,
+#     `yjs_awareness*`, `yjs_state_request`) require only *read* permission
+#     — viewers showing their avatar / cursor is an intended Google-Docs-style
+#     affordance and forging another user's position is bounded griefing, not
+#     state corruption.
 
 @frappe.whitelist()
 def broadcast_op(name: str, op: str) -> None:
 	"""Broadcast a cell-op JSON string to all clients watching this sheet."""
-	frappe.has_permission("Sheet", doc=name, throw=True)
+	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
 	frappe.publish_realtime(
 		"sheet_op",
 		{"sheet": name, "user": frappe.session.user, "op": op},
@@ -76,10 +90,16 @@ def yjs_relay(name: str, event: str, payload: str) -> None:
 	verbatim so the server stays out of the CRDT protocol). The sender's
 	`from` tag inside the payload is what other clients use to ignore
 	their own echo.
+
+	Mutation-shaped events (``yjs_update``, ``yjs_state``) require write
+	permission so a read-only viewer can't push CRDT updates that other
+	clients will apply locally. Presence and state-request events are
+	read-side affordances.
 	"""
 	if event not in _YJS_EVENTS:
 		frappe.throw(f"Unknown yjs event: {event}")
-	frappe.has_permission("Sheet", doc=name, throw=True)
+	ptype = "write" if event in _YJS_WRITE_EVENTS else "read"
+	frappe.has_permission("Sheet", doc=name, ptype=ptype, throw=True)
 	frappe.publish_realtime(
 		event,
 		{"sheet": name, "user": frappe.session.user, "payload": payload},
@@ -94,6 +114,11 @@ _YJS_EVENTS = frozenset({
 	"yjs_awareness",
 	"yjs_awareness_bye",
 })
+
+# Events that mutate co-editors' local Yjs document. A read-only sharee
+# may still ask for state (`yjs_state_request`) and emit awareness/presence
+# events, but they must not be able to inject updates or full-state dumps.
+_YJS_WRITE_EVENTS = frozenset({"yjs_update", "yjs_state"})
 
 
 # ── Sharing ───────────────────────────────────────────────────────────────────
@@ -120,8 +145,15 @@ def share_sheet(name: str, user: str, write: int = 0) -> dict:
 	# may grant access to others. Default `read` was too permissive
 	# (any viewer could re-share a sheet to anyone).
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
-	if not frappe.db.exists("User", user):
+	# Reject disabled users (and non-existent ones) up front — silently
+	# carrying a share to an account that's been turned off lets it light
+	# up again the moment the account is re-enabled, which is rarely what
+	# the granter expected.
+	enabled = frappe.db.get_value("User", user, "enabled")
+	if enabled is None:
 		frappe.throw(f"User {user} not found")
+	if not enabled:
+		frappe.throw(f"User {user} is disabled")
 	frappe.share.add("Sheet", name, user, write=int(write), share=0, notify=True)
 	return {"status": "ok"}
 
@@ -217,6 +249,11 @@ def delete_sheet(name: str) -> str:
 
 @frappe.whitelist()
 def rename_sheet(name: str, title: str) -> str:
+	# Explicit gate up-front so the failure mode is the same as the rest of
+	# this module — `doc.save()` would ultimately enforce write perm too,
+	# but defence-in-depth keeps the surface uniform if the controller ever
+	# changes.
+	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
 	title = _clean_title(title)
 	if not title:
 		frappe.throw("Title is required")
