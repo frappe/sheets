@@ -1,7 +1,7 @@
 // Gzip + base64 envelope for uploading large sheets_data payloads.
 //
 // Mirrors the server-side wire format in
-// frappe_sheets_next/sheets/doctype/sheet/storage.py:
+// sheets/sheets/doctype/sheet/storage.py:
 //
 //   {"_z": "gzip", "data": "<base64-encoded gzip bytes>"}
 //

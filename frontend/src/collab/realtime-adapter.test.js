@@ -26,7 +26,7 @@ describe('createRealtimeAdapter', () => {
 		})
 		await adapter.publish('yjs_update', { from: 'A', update: 'abc' })
 		expect(callFn).toHaveBeenCalledWith(
-			'frappe_sheets_next.api.yjs_relay',
+			'sheets.api.yjs_relay',
 			{ name: 'SHEET-1', event: 'yjs_update', payload: '{"from":"A","update":"abc"}' },
 		)
 	})

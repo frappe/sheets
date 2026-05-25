@@ -1,14 +1,14 @@
 // Client for the v2 versioning API.
 //
 // Server-side architecture: event log (Sheet Op Log) + checkpointed
-// snapshots (Sheet Snapshot). See frappe_sheets_next/versioning/ for the
+// snapshots (Sheet Snapshot). See sheets/versioning/ for the
 // docstrings. This module is a thin shim that maps v2 endpoints to the
 // shape the existing UI layer consumes, so the version-history panel and
 // cell-history popover stay drop-in compatible while we keep moving.
 
 import { call } from '../utils/api.js'
 
-const PREFIX = 'frappe_sheets_next.versioning.api'
+const PREFIX = 'sheets.versioning.api'
 
 const _tzOffsetMinutes = () => -new Date().getTimezoneOffset()
 
@@ -99,7 +99,7 @@ export async function saveVersion(sheet, versionName) {
 
 export async function makeACopy(sheet, version, title = '') {
 	const state = await call(`${PREFIX}.state_at`, { snapshot: version })
-	const out = await call('frappe_sheets_next.api.save_sheet', {
+	const out = await call('sheets.api.save_sheet', {
 		title:       title || 'Copy',
 		sheets_data: state.sheets_data || '{}',
 	})
@@ -146,7 +146,7 @@ export async function cellDiff(_sheet, _version, _against = '') {
 
 export function recordOp({ sheet, opType, cellRefs = null, before = null,
                            after = null, summary = '', subSheet = '' }) {
-	return call('frappe_sheets_next.api.record_op', {
+	return call('sheets.api.record_op', {
 		sheet,
 		op_type:   opType,
 		cell_refs: cellRefs && JSON.stringify(cellRefs),

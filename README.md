@@ -29,16 +29,16 @@ Requires Frappe Framework 15 or 16.
 ```bash
 cd $PATH_TO_YOUR_BENCH
 bench get-app https://github.com/asif-mulani/frappe-sheets-next --branch main
-bench --site $YOUR_SITE install-app frappe_sheets_next
+bench --site $YOUR_SITE install-app sheets
 ```
 
 After install, open the app from the Frappe desk app-switcher, or visit
-`https://<your-site>/frappe_sheets_next` directly.
+`https://<your-site>/sheets` directly.
 
 ## Frappe Cloud
 
 Add this repo URL as a custom app on your Frappe Cloud bench. The frontend
-assets are pre-built and committed to `frappe_sheets_next/public/` so no Node
+assets are pre-built and committed to `sheets/public/` so no Node
 build runs on Cloud — see [BUILD.md](./BUILD.md) for the release workflow.
 
 ## Contributing
@@ -48,7 +48,7 @@ This app uses `pre-commit` for code formatting and linting. Please
 this repository:
 
 ```bash
-cd apps/frappe_sheets_next
+cd apps/sheets
 pre-commit install
 ```
 

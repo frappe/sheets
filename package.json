@@ -1,5 +1,5 @@
 {
-  "name": "frappe_sheets_next",
+  "name": "sheets",
   "version": "0.0.1",
   "private": true,
   "dependencies": {

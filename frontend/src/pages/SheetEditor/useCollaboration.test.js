@@ -160,7 +160,7 @@ describe('useCollaboration — broadcast functions', () => {
 		broadcastCellChange('Sheet1', 'A1', '42')
 		// Should not call the old broadcast_op endpoint or any other API.
 		const newCalls = callFn.mock.calls.slice(before)
-		expect(newCalls.find(([m]) => m === 'frappe_sheets_next.api.broadcast_op')).toBeUndefined()
+		expect(newCalls.find(([m]) => m === 'sheets.api.broadcast_op')).toBeUndefined()
 	})
 
 	it('broadcastBatchChange is a no-op', () => {
@@ -168,7 +168,7 @@ describe('useCollaboration — broadcast functions', () => {
 		const before = callFn.mock.calls.length
 		broadcastBatchChange('Sheet1', [{ id: 'A1', value: 'x' }])
 		const newCalls = callFn.mock.calls.slice(before)
-		expect(newCalls.find(([m]) => m === 'frappe_sheets_next.api.broadcast_op')).toBeUndefined()
+		expect(newCalls.find(([m]) => m === 'sheets.api.broadcast_op')).toBeUndefined()
 	})
 
 	it('broadcastCursor publishes the cursor via yjs_relay → yjs_awareness', () => {
@@ -178,7 +178,7 @@ describe('useCollaboration — broadcast functions', () => {
 		// setLocalState — so we grab the *latest* awareness call, which
 		// should carry the cursor we just set.
 		const awarenessCalls = callFn.mock.calls.filter(
-			([m, args]) => m === 'frappe_sheets_next.api.yjs_relay' && args.event === 'yjs_awareness',
+			([m, args]) => m === 'sheets.api.yjs_relay' && args.event === 'yjs_awareness',
 		)
 		expect(awarenessCalls.length).toBeGreaterThan(0)
 		const last = awarenessCalls[awarenessCalls.length - 1]
@@ -190,7 +190,7 @@ describe('useCollaboration — broadcast functions', () => {
 		const { broadcastCursor, callFn } = makeDeps()
 		broadcastCursor(3, 5, 'Sheet1', { r0: 2, c0: 4, r1: 6, c1: 8 })
 		const awarenessCalls = callFn.mock.calls.filter(
-			([m, args]) => m === 'frappe_sheets_next.api.yjs_relay' && args.event === 'yjs_awareness',
+			([m, args]) => m === 'sheets.api.yjs_relay' && args.event === 'yjs_awareness',
 		)
 		const last = awarenessCalls[awarenessCalls.length - 1]
 		const published = JSON.parse(last[1].payload)
@@ -219,7 +219,7 @@ describe('useCollaboration — local cell writes mirror to Y.Doc', () => {
 		sheet.setCell('A1', 'hello', 'Sheet1')
 		const after = callFn.mock.calls.slice(before)
 		const updates = after.filter(
-			([m, args]) => m === 'frappe_sheets_next.api.yjs_relay' && args.event === 'yjs_update',
+			([m, args]) => m === 'sheets.api.yjs_relay' && args.event === 'yjs_update',
 		)
 		expect(updates.length).toBeGreaterThan(0)
 	})

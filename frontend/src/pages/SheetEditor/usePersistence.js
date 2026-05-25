@@ -11,7 +11,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
 
   async function loadSheet(name) {
     try {
-      const doc    = await call('frappe_sheets_next.api.get_sheet', { name })
+      const doc    = await call('sheets.api.get_sheet', { name })
       const saved  = JSON.parse(doc.sheets_data || '{}')
       if (saved.formats)    formats.restore(saved.formats)
       sheet.restore(saved.sheet ?? { sheets: { Sheet1: {} }, current: 'Sheet1' })
@@ -61,7 +61,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
       const payload = await encodeForUpload(sheetsData)
       // The save endpoint now returns { name, head_seq } so the client knows
       // where its batch of ops landed in the canonical op-log ordering.
-      const result = await call('frappe_sheets_next.api.save_sheet', {
+      const result = await call('sheets.api.save_sheet', {
         title,
         sheets_data: payload,
         ...(name ? { name } : {}),

@@ -17,10 +17,10 @@ export default defineConfig({
     }),
   ],
 
-  base: '/assets/frappe_sheets_next/frappe_sheets_next/',
+  base: '/assets/sheets/sheets/',
 
   build: {
-    outDir: '../frappe_sheets_next/public/frappe_sheets_next',
+    outDir: '../sheets/public/sheets',
     emptyOutDir: true,
     rollupOptions: {
       output: {

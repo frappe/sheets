@@ -242,7 +242,7 @@ export function useVersionHistory({
     try {
       const newName = await _versionsApi.makeACopy(sheetId.value, versionId, title.trim())
       if (newName) {
-        const url = `${window.location.origin}/frappe_sheets_next/sheet/${newName}`
+        const url = `${window.location.origin}/sheets/sheet/${newName}`
         window.open(url, '_blank')
       }
     } catch (err) {

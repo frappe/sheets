@@ -1,5 +1,5 @@
 [project]
-name = "frappe_sheets_next"
+name = "sheets"
 authors = [
     { name = "Asif", email = "asif@frappe.io"}
 ]
