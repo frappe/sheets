@@ -36,7 +36,12 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 				cells.push(String(sheet.getDisplayValue(colLabel(c) + (r + 1))).replace(/\t|\n/g, ' '))
 			rows.push(cells.join('\t'))
 		}
-		navigator.clipboard?.writeText(rows.join('\n')).catch(() => {})
+		// Guard `navigator` at the global level — Node < 21 (CI runs Node 20)
+		// doesn't expose it, and optional-chaining only on `.clipboard` still
+		// throws ReferenceError when `navigator` itself is undefined.
+		if (typeof navigator !== 'undefined') {
+			navigator.clipboard?.writeText(rows.join('\n')).catch(() => {})
+		}
 	}
 
 	// ── Public ────────────────────────────────────────────────────────────────
