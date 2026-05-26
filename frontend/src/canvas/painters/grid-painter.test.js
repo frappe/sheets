@@ -43,6 +43,31 @@ describe('GridPainter', () => {
       // Only one stroke() call — the main grid path (hidden boundary path is a no-op beginPath+stroke)
       expect(ctx.stroke).toHaveBeenCalledTimes(2)
     })
+
+    // Set up two parallel painters: same hidden-row layout, but one with the
+    // hidden row tagged as filter-hidden. The difference in moveTo count
+    // between them is exactly the bold boundary stroke we want to suppress.
+    function countMoveTos(geoOpts) {
+      const localCtx = createMockCtx()
+      const p = createGridPainter(localCtx, createMockGeo(geoOpts))
+      p.drawGridLines(0, 0, 4, 1, 500, 300)
+      return localCtx.moveTo.mock.calls.length
+    }
+
+    it('suppresses the bold boundary stroke for filter-hidden rows', () => {
+      const manual = countMoveTos({ rowHeights: { 2: 0 } })
+      const filter = countMoveTos({ rowHeights: { 2: 0 }, filterHidden: new Set([2]) })
+      // Manual hide adds one extra bold boundary moveTo; the filter case
+      // must skip that, so its count is one lower.
+      expect(manual - filter).toBe(1)
+    })
+
+    it('still draws the bold boundary for manually-hidden rows', () => {
+      const none   = countMoveTos({})
+      const manual = countMoveTos({ rowHeights: { 2: 0 } })
+      // Manual hide path must add exactly one extra moveTo vs. no-hide.
+      expect(manual - none).toBe(1)
+    })
   })
 
   describe('drawFreezeSeparators', () => {

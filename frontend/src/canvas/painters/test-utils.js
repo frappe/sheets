@@ -29,13 +29,14 @@ export function createMockCtx() {
   }
 }
 
-export function createMockGeo({ colWidths = {}, rowHeights = {} } = {}) {
+export function createMockGeo({ colWidths = {}, rowHeights = {}, filterHidden = new Set() } = {}) {
   const cw  = vi.fn((c) => colWidths[c]  ?? 100)
   const rh  = vi.fn((r) => rowHeights[r] ?? 24)
   const colX = vi.fn((c) => 50 + c * 100)
   const rowY = vi.fn((r) => 24 + r * 24)
+  const isFilterHidden = vi.fn((r) => filterHidden.has(r))
   return {
-    cw, rh, colX, rowY,
+    cw, rh, colX, rowY, isFilterHidden,
     firstVisCol: vi.fn(() => 0),
     firstVisRow: vi.fn(() => 0),
     lastVisCol:  vi.fn(() => 5),
