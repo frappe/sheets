@@ -50,7 +50,7 @@ function _cartesianOption(config, headerRow, dataRows, encoding, kind) {
 
 	return {
 		..._baseOption(config),
-		tooltip: { trigger: 'axis' },
+		tooltip: { trigger: 'axis', confine: true },
 		grid:    { top: 56, left: 56, right: 24, bottom: 40, containLabel: true },
 		xAxis: {
 			type:        kind === 'scatter' ? 'value' : 'category',
@@ -81,7 +81,7 @@ function _pieOption(config, headerRow, dataRows, encoding) {
 
 	return {
 		..._baseOption(config),
-		tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+		tooltip: { trigger: 'item', confine: true, formatter: '{b}: {c} ({d}%)' },
 		series: [{
 			name: headerRow?.[valueCol] || 'Value',
 			type: 'pie',
