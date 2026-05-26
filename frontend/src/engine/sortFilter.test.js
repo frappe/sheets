@@ -100,6 +100,30 @@ describe('createSortFilter — ranged + per-sheet filters', () => {
       expect(sf.computeHiddenRows('Sheet2').size).toBe(0)
     })
 
+    it('end-to-end: "contains 0" on a mixed-number column hides non-zero rows', () => {
+      // Reproducing the user-reported scenario: column A has plain-number
+      // cells like 4, 8, 12, 20, 306, 606, 1212, 2402. Applying a "contains 0"
+      // filter on column A must keep rows whose stringified value contains
+      // "0" (20, 306, 606, 2402) and hide the rest (4, 8, 12, 1212).
+      const numericSheet = makeSheet({
+        A1: 'column 1',   // header
+        A2: 4,    A3: 8,    A4: 12,   A5: 20,
+        A6: 306,  A7: 606,  A8: 1212, A9: 2402,
+      })
+      const nsf = createSortFilter(numericSheet)
+      nsf.setRange({ r0: 0, c0: 0, r1: 8, c1: 0 }, 'Sheet1')
+      nsf.setFilter(0, { operator: 'contains', value: '0' }, 'Sheet1')
+      const hidden = nsf.computeHiddenRows('Sheet1')
+      expect(hidden.has(1)).toBe(true)    // 4   — hidden
+      expect(hidden.has(2)).toBe(true)    // 8   — hidden
+      expect(hidden.has(3)).toBe(true)    // 12  — hidden
+      expect(hidden.has(4)).toBe(false)   // 20  — visible
+      expect(hidden.has(5)).toBe(false)   // 306 — visible
+      expect(hidden.has(6)).toBe(false)   // 606 — visible
+      expect(hidden.has(7)).toBe(true)    // 1212 — hidden
+      expect(hidden.has(8)).toBe(false)   // 2402 — visible
+    })
+
     it('matches against the displayed (evaluated) value, not the raw formula', () => {
       // B3 / B4 store formulas; the engine resolves them to 306 / 6.
       // A "contains 0" filter on B must match B3 (306 contains "0") but not
