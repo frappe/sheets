@@ -616,6 +616,13 @@ const FUNCTIONS = {
 	// inverted, which silently broke every exact-match VLOOKUP call.
 	VLOOKUP: ([lookup,table,colIdx,rangeLookup]) => {
 		if(!Array.isArray(table)) return '#VALUE!'
+		// Implicit intersection: when the user passes a range as the lookup
+		// value (e.g. =VLOOKUP(C25:C44, …) instead of =VLOOKUP(C25, …)),
+		// reduce it to its first scalar. The engine doesn't spill arrays, so
+		// without this every range-as-lookup formula coerces to a joined
+		// string and returns #N/A. Matches Excel's pre-spill behaviour and
+		// lets the user fill the formula down to populate the column.
+		if (Array.isArray(lookup)) lookup = Array.isArray(lookup[0]) ? lookup[0][0] : lookup[0]
 		const ci=toNum(colIdx)-1
 		const exact = rangeLookup === false || rangeLookup === 0
 		if(!exact) {
@@ -639,6 +646,7 @@ const FUNCTIONS = {
 	},
 	HLOOKUP: ([lookup,table,rowIdx,rangeLookup]) => {
 		if(!Array.isArray(table)||!Array.isArray(table[0])) return '#VALUE!'
+		if (Array.isArray(lookup)) lookup = Array.isArray(lookup[0]) ? lookup[0][0] : lookup[0]
 		const ri=toNum(rowIdx)-1, first=table[0]
 		const exact = rangeLookup === false || rangeLookup === 0
 		let ci=-1

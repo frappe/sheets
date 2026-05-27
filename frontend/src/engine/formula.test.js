@@ -243,6 +243,14 @@ describe('lookup functions', () => {
     const cells = { A1: 10, B1: 'low', A2: 20, B2: 'mid', A3: 30, B3: 'hi' }
     expect(evalExpr('=VLOOKUP(25,A1:B3,2,TRUE())', { cells })).toBe('mid')
   })
+  it('VLOOKUP with range as lookup_value uses first cell (implicit intersection)', () => {
+    // Without spill arrays, =VLOOKUP(D1:D3, A1:B3, 2, 0) used to coerce the
+    // range to a joined string ("k1,k2,k3") and return #N/A. Now the lookup
+    // reduces to D1 ("k2") so the formula returns a useful value the user
+    // can then fill down.
+    const cells = { A1: 'k1', B1: 'v1', A2: 'k2', B2: 'v2', A3: 'k3', B3: 'v3', D1: 'k2', D2: 'k3', D3: 'k1' }
+    expect(evalExpr('=VLOOKUP(D1:D3,A1:B3,2,FALSE())', { cells })).toBe('v2')
+  })
   it('HLOOKUP exact match', () => {
     const cells = { A1: 'k1', B1: 'k2', C1: 'k3', A2: 'v1', B2: 'v2', C2: 'v3' }
     expect(evalExpr('=HLOOKUP("k2",A1:C2,2,FALSE())', { cells })).toBe('v2')
