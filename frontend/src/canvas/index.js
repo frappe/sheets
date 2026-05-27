@@ -918,14 +918,30 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     const resizeCol = geo.hitTestColResize(e.clientX, e.clientY, rect)
     if (resizeCol !== null) {
       e.preventDefault()
-      resizing = { col: resizeCol, startX: e.clientX, startW: colW[resizeCol] ?? 100 }
+      // Broadcast resize: when the dragged column is part of a multi-column
+      // selection (whole-grid via corner-click, or a header-drag column
+      // range), apply the new width to every column in that selection.
+      // Otherwise fall back to single-column resize.
+      const range = getSelRange()
+      const cols = (selMode === 'all')
+        ? Array.from({ length: TOTAL_COLS }, (_, c) => c)
+        : (selMode === 'col' && resizeCol >= range.c0 && resizeCol <= range.c1)
+          ? Array.from({ length: range.c1 - range.c0 + 1 }, (_, i) => range.c0 + i)
+          : [resizeCol]
+      resizing = { cols, startX: e.clientX, startW: colW[resizeCol] ?? 100 }
       return
     }
 
     const resizeRowHit = geo.hitTestRowResize(e.clientX, e.clientY, rect)
     if (resizeRowHit !== null) {
       e.preventDefault()
-      resizingRow = { row: resizeRowHit, startY: e.clientY, startH: rowH[resizeRowHit] ?? DEFAULT_ROW_H }
+      const range = getSelRange()
+      const rows = (selMode === 'all')
+        ? Array.from({ length: TOTAL_ROWS }, (_, r) => r)
+        : (selMode === 'row' && resizeRowHit >= range.r0 && resizeRowHit <= range.r1)
+          ? Array.from({ length: range.r1 - range.r0 + 1 }, (_, i) => range.r0 + i)
+          : [resizeRowHit]
+      resizingRow = { rows, startY: e.clientY, startH: rowH[resizeRowHit] ?? DEFAULT_ROW_H }
       return
     }
 
@@ -1113,13 +1129,19 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   function _onDocMouseMove(e) {
     if (resizing) {
       // Drag delta is in physical CSS px; colW stores logical units, so undo
-      // the zoom on the delta before applying.
-      colW[resizing.col] = Math.max(30, resizing.startW + (e.clientX - resizing.startX) / _zoom)
+      // the zoom on the delta before applying. When multiple columns are in
+      // the resize target (whole-grid select or header-drag range), every
+      // one gets the same final width — matches Sheets / Excel where
+      // resizing any column of a multi-column selection sets all to the
+      // dragged column's new width.
+      const w = Math.max(30, resizing.startW + (e.clientX - resizing.startX) / _zoom)
+      for (const c of resizing.cols) colW[c] = w
       _applyCanvasSize()
       render()
     }
     if (resizingRow) {
-      rowH[resizingRow.row] = Math.max(16, resizingRow.startH + (e.clientY - resizingRow.startY) / _zoom)
+      const h = Math.max(16, resizingRow.startH + (e.clientY - resizingRow.startY) / _zoom)
+      for (const r of resizingRow.rows) rowH[r] = h
       _applyCanvasSize()
       render()
     }
