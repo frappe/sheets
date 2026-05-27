@@ -3703,8 +3703,11 @@ function toggleShowFormulas() {
 }
 .sn-tab-chevron :deep(button:hover) { color:var(--ink-gray-9); }
 
-/* Add-sheet button */
-.sn-tab-add { flex-shrink:0; align-self:center; margin:0 2px; }
+/* Add-sheet button — pin its inner Button to the same 28px height as the
+   tab labels and center within the track so the `+` sits on the same row
+   axis as the tab text, not floating a couple of pixels above. */
+.sn-tab-add { flex-shrink:0; align-self:center; margin:0 4px; }
+.sn-tab-add :deep(button) { height:28px; width:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
 
 .sn-tab-drag-over::before {
   content:''; position:absolute; left:0; top:6px; bottom:6px;
