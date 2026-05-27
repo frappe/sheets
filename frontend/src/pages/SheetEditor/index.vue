@@ -816,6 +816,7 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { createGrid }          from '../../canvas/index.js'
 import { colLabel, parseCellId, cellId } from '../../utils/cells.js'
+import { parseNumberFmt, buildNumberFmt, applyNumberFmt } from '../../utils/format-number.js'
 import { computeFillDown, computeFillRight } from '../../engine/fill-series.js'
 import { detectSeries }                       from '../../engine/patterns/index.js'
 import { adjustFormula }                    from '../../engine/formula-adjust.js'
@@ -1311,46 +1312,8 @@ function formatStat(n) {
 
 
 // ── Number format helpers ─────────────────────────────────────────────────────
-
-// Number format is encoded as either a bare type ('number') or `type:decimals`
-// (e.g. 'number:3', 'currency:0'). The increase/decrease-decimals buttons
-// mutate the trailing ':N'.
-function parseNumberFmt(fmt) {
-  if (!fmt) return { type: '', decimals: null }
-  const [type, n] = String(fmt).split(':')
-  return { type, decimals: n != null && n !== '' ? parseInt(n, 10) : null }
-}
-
-function buildNumberFmt(type, decimals) {
-  if (!type) return ''
-  return decimals == null ? type : `${type}:${decimals}`
-}
-
-function applyNumberFmt(value, format) {
-  if (!format) return value
-  const { type, decimals } = parseNumberFmt(format)
-  // Text format leaves the value untouched (no numeric coercion at display).
-  // Cells flagged 'text' should also be treated as text in formulas; that's
-  // handled by the engine's strict-arithmetic — see toNumStrict.
-  if (type === 'text') return value == null ? '' : String(value)
-  const n = parseFloat(value)
-  if (isNaN(n) && type !== 'date') return value
-  if (type === 'number') {
-    return decimals == null
-      ? n.toLocaleString()
-      : n.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-  }
-  if (type === 'currency') {
-    const d = decimals ?? 2
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: d, maximumFractionDigits: d }).format(n)
-  }
-  if (type === 'percentage') return (n * 100).toFixed(decimals ?? 2) + '%'
-  if (type === 'date') {
-    const d = parseFloat(value)
-    return isNaN(d) ? value : new Date(d).toLocaleDateString()
-  }
-  return value
-}
+// Grammar + renderer live in utils/format-number.js so they can be unit-tested
+// in isolation. The toolbar wiring below is the only Vue-specific bit.
 
 // Bump decimal precision for the selection. Treats 'General' as 'number:1' on
 // first +, no-op on -. Numeric types pick a sensible default if no decimals
@@ -1360,7 +1323,7 @@ function adjustDecimals(delta) {
   const sh = sheet.getCurrentSheet()
   for (const id of ids) {
     const cur = formats.get(id, sh).numberFormat || ''
-    let { type, decimals } = parseNumberFmt(cur)
+    let { type, variant, decimals } = parseNumberFmt(cur)
     if (!type) {
       if (delta < 0) continue
       type = 'number'
@@ -1369,7 +1332,7 @@ function adjustDecimals(delta) {
     const defaultDec = type === 'currency' ? 2 : type === 'percentage' ? 2 : 2
     if (decimals == null) decimals = defaultDec
     decimals = Math.max(0, Math.min(20, decimals + delta))
-    const next = buildNumberFmt(type, decimals)
+    const next = buildNumberFmt(type, variant, decimals)
     formats.applyToRange([id], { numberFormat: next }, sh)
     const raw = sheet.getDisplayValue(id)
     grid?.setCell(id, applyNumberFmt(raw, next))
