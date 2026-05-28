@@ -40,7 +40,7 @@
  "links": [],
  "modified": "2026-05-19 14:39:41.599820",
  "modified_by": "asif@frappe.io",
- "module": "Sheets",
+ "module": "Spreadsheet",
  "name": "Sheet",
  "naming_rule": "Random",
  "owner": "Administrator",

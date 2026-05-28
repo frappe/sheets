@@ -28,7 +28,7 @@
  "links": [],
  "modified": "2026-05-23 00:00:00",
  "modified_by": "Administrator",
- "module": "Sheets",
+ "module": "Spreadsheet",
  "name": "Sheet Seq",
  "naming_rule": "By fieldname",
  "owner": "Administrator",
