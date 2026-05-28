@@ -189,8 +189,32 @@ export function createSheet({ onCellChanged, onCellsChanged } = {}) {
 		// may now be stale, so the safe move is to drop every sheet's memo
 		// instead of trying to track which entries were affected.
 		_clearAllMemo()
-		if (sheet === current) onCellsChanged?.(sheet)
+		if (sheet === current) {
+			// For incremental writes (replace=false, e.g. paste), the host can
+			// repaint only the cells that actually moved plus the formulas
+			// that depend on them — way cheaper than walking 25k cells in
+			// _repopulateGrid. For wholesale writes (replace=true, e.g.
+			// import) the host gets `null` and falls back to a full
+			// repopulate since most of the sheet just changed.
+			const affected = replace ? null : _collectAffected(after, sheet)
+			onCellsChanged?.(sheet, affected)
+		}
 		return { before, after }
+	}
+
+	// For an incremental batch write, the host needs to refresh:
+	//   - every cell it explicitly changed (Object.keys(after))
+	//   - every formula on this sheet that depends on those cells, since
+	//     their evaluated values shifted when the source data did
+	// Returns a Set<cellId> the host can iterate.
+	function _collectAffected(after, sheet) {
+		const set = new Set(Object.keys(after))
+		for (const id of Object.keys(after)) {
+			for (const dep of deps.getDependents(id, sheet)) {
+				if (dep.sheet === sheet) set.add(dep.cellId)
+			}
+		}
+		return set
 	}
 
 	function _notify(id, sheet = current) {

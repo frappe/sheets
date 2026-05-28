@@ -894,12 +894,23 @@ const sheet = createSheet({
     const displayed = fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue
     grid?.setCell(id, displayed)
   },
-  // Bulk-write callback — fires once after batchSetCells (large imports).
-  // Skip the per-cell repaint cascade and use _repopulateGrid's existing
-  // bulk-fill path. condFormat stats are invalidated once instead of N times.
-  onCellsChanged() {
+  // Bulk-write callback. Two flavours:
+  //   - `affected = null` — wholesale rewrite (import / load / restore).
+  //     The whole sheet may have changed, so do a full _repopulateGrid.
+  //   - `affected = Set<cellId>` — incremental write (paste, future
+  //     fill/format ops). Only repaint the cells the engine flagged.
+  //     For a paste of 50 cells in a 5k-cell sheet this is 50 grid
+  //     updates instead of 5k, which is where the perf trace pinned
+  //     onCellsChanged at 181 ms self time after the snapshot fix.
+  onCellsChanged(_sheet, affected) {
     condFormat?.invalidate()
-    _repopulateGrid()
+    if (!affected) { _repopulateGrid(); return }
+    const sn = sheet.getCurrentSheet()
+    for (const id of affected) {
+      const fmt = formats.get(id, sn)
+      const displayValue = sheet.getDisplayValue(id)
+      grid?.setCell(id, fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue)
+    }
   },
 })
 const formats    = createFormatsEngine()
