@@ -112,27 +112,51 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		if (!anch) return
 		const sh = sheet.getCurrentSheet()
 		const targets = _resolveTargets(anch, destSel)
-		for (const { r, c, dr, dc } of targets) {
-			const id  = colLabel(c) + (r + 1)
-			const key = `${dr},${dc}`
-			const raw = _data[key]
-			if (kind === 'all' || kind === 'formulas') {
-				const adjusted = typeof raw === 'string' && raw.startsWith('=')
-					? adjustFormula(raw, r - (_srcSel.r0 + dr), c - (_srcSel.c0 + dc))
-					: raw
-				sheet.setCell(id, adjusted)
-			} else if (kind === 'values') {
-				const isFormula = typeof raw === 'string' && raw.startsWith('=')
-				const v = isFormula ? _displayAt(key) : raw
-				sheet.setCell(id, v)
+
+		// Two-pass: build the cell-value map first, hand it to batchSetCells in
+		// one shot so the engine does ONE dep-rebuild + ONE bulk notify instead
+		// of N per-cell setCell calls (each of which parses deps, fires the
+		// notify cascade, and — through collab's patched setCell — opens a Y.Doc
+		// transaction). For a 5k-cell paste this cuts the value-write phase
+		// from hundreds of ms to ~50 ms. Formats / validation stay per-cell
+		// because those engines don't have a batch API yet.
+		const writes = {}
+		const wantValues = kind === 'all' || kind === 'formulas' || kind === 'values'
+		if (wantValues) {
+			for (const { r, c, dr, dc } of targets) {
+				const id  = colLabel(c) + (r + 1)
+				const key = `${dr},${dc}`
+				const raw = _data[key]
+				if (kind === 'all' || kind === 'formulas') {
+					writes[id] = typeof raw === 'string' && raw.startsWith('=')
+						? adjustFormula(raw, r - (_srcSel.r0 + dr), c - (_srcSel.c0 + dc))
+						: raw
+				} else {
+					// 'values' — formulas paste as their computed display value.
+					const isFormula = typeof raw === 'string' && raw.startsWith('=')
+					writes[id] = isFormula ? _displayAt(key) : raw
+				}
 			}
-			if (formats && _fmts[key] && (kind === 'all' || kind === 'formats')) {
-				formats.set(id, _fmts[key], sh)
+			if (sheet.batchSetCells) {
+				sheet.batchSetCells(writes, sh, { replace: false })
+			} else {
+				// Engine without batch API — fall back to per-cell loop.
+				for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sh)
 			}
-			if (validation && _vals && (kind === 'all' || kind === 'formats')) {
-				const rule = _vals[key]
-				if (rule) validation.set(id, rule, sh)
-				else      validation.clear(id, sh)
+		}
+
+		// Formats / validation pass — still per-cell, but skipped entirely when
+		// the user picked Values or Formulas mode.
+		if ((kind === 'all' || kind === 'formats') && (formats || validation)) {
+			for (const { r, c, dr, dc } of targets) {
+				const id  = colLabel(c) + (r + 1)
+				const key = `${dr},${dc}`
+				if (formats && _fmts[key]) formats.set(id, _fmts[key], sh)
+				if (validation && _vals) {
+					const rule = _vals[key]
+					if (rule) validation.set(id, rule, sh)
+					else      validation.clear(id, sh)
+				}
 			}
 		}
 		// Copy conditional-format rules to the destination range.
@@ -144,13 +168,16 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		// Only consume the cut buffer when we actually moved content.
 		if (_mode === 'cut' && _srcSel && (kind === 'all' || kind === 'values' || kind === 'formulas')) {
 			const { r0, c0, r1, c1 } = _srcSel
+			const clears = {}
 			for (let r = r0; r <= r1; r++)
 				for (let c = c0; c <= c1; c++) {
 					const id = colLabel(c) + (r + 1)
-					sheet.setCell(id, '')
+					clears[id] = ''
 					if (formats)    formats.clear(id, sh)
 					if (validation) validation.clear(id, sh)
 				}
+			if (sheet.batchSetCells) sheet.batchSetCells(clears, sh, { replace: false })
+			else                     for (const id of Object.keys(clears)) sheet.setCell(id, '', sh)
 			_data = _fmts = _vals = _mode = _srcSel = null
 		}
 		// Post-mutate snapshot — history.push() must run after the data has
@@ -187,19 +214,27 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 			&& ((destSel.r1 - destSel.r0 + 1) % srcRows === 0)
 			&& ((destSel.c1 - destSel.c0 + 1) % srcCols === 0)
 
+		// Build the cell map first, then ship one bulk write — same reason as
+		// paste() above. Big external pastes (Excel/CSV via system clipboard)
+		// were the worst case here.
+		const writes = {}
 		if (tileable) {
 			for (let r = destSel.r0; r <= destSel.r1; r++) {
 				for (let c = destSel.c0; c <= destSel.c1; c++) {
 					const dr = (r - destSel.r0) % srcRows
 					const dc = (c - destSel.c0) % srcCols
-					sheet.setCell(colLabel(c) + (r + 1), grid[dr][dc] ?? '')
+					writes[colLabel(c) + (r + 1)] = grid[dr][dc] ?? ''
 				}
 			}
 		} else {
 			grid.forEach((row, dr) =>
-				row.forEach((val, dc) =>
-					sheet.setCell(colLabel(anch.col + dc) + (anch.row + dr + 1), val)))
+				row.forEach((val, dc) => {
+					writes[colLabel(anch.col + dc) + (anch.row + dr + 1)] = val
+				}))
 		}
+		const sn = sheet.getCurrentSheet()
+		if (sheet.batchSetCells) sheet.batchSetCells(writes, sn, { replace: false })
+		else                     for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sn)
 		historyPush?.()   // post-mutate snapshot
 	}
 
