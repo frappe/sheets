@@ -148,6 +148,38 @@ export function useExportImport({
   }
 
   // ── imports ──────────────────────────────────────────────────────────────────
+  //
+  // Large imports (50 MB CSV, 100k+ rows) used to freeze the main thread for
+  // tens of seconds — Chrome would put up its "Page Unresponsive" dialog.
+  // Three changes fix that:
+  //   1) Build a plain {cellId: value} map first, then hand it to the engine's
+  //      batchSetCells (one dep-graph rebuild + one bulk repaint, no per-cell
+  //      formula cascades).
+  //   2) Chunk the cell-id construction loop so it yields to the event loop
+  //      every CHUNK_ROWS rows — the browser stays responsive even if the
+  //      import takes a couple of seconds.
+  //   3) Imports are not undoable (matches Sheets / Excel behaviour). The
+  //      before/after snapshot of every cell was eating ~2× memory and a
+  //      separate iteration pass; dropping it is a clean win.
+  const CHUNK_ROWS = 2000
+
+  function _yield() { return new Promise(r => setTimeout(r, 0)) }
+
+  // Build {cellId: value} from a rectangular row array, yielding to the
+  // event loop every CHUNK_ROWS rows so the UI stays responsive on big files.
+  async function _rowsToCellMap(rows) {
+    const out = {}
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r]
+      if (!row) continue
+      for (let c = 0; c < row.length; c++) {
+        const val = row[c]
+        if (val !== '' && val != null) out[colLabel(c) + (r + 1)] = String(val)
+      }
+      if ((r + 1) % CHUNK_ROWS === 0) await _yield()
+    }
+    return out
+  }
 
   async function importXLSX(e) {
     const file = e.target.files?.[0]
@@ -155,33 +187,9 @@ export function useExportImport({
     const { read, utils } = await import('xlsx')
     const buf  = await file.arrayBuffer()
     const wb   = read(buf, { type: 'array' })
-    const sheet     = getSheet()
-    const grid      = getGrid()
-    const currentSh = sheet.getCurrentSheet()
-    const before    = {}
-    for (const id of Object.keys(sheet.getRawData(currentSh)))
-      before[id] = sheet.getCell(id, currentSh)
-    if (grid) grid.clearAll()
-    for (const id of Object.keys(sheet.getRawData(currentSh))) sheet.setCell(id, '')
     const ws   = wb.Sheets[wb.SheetNames[0]]
     const rows = utils.sheet_to_json(ws, { header: 1, defval: '' })
-    const after = {}
-    for (let r = 0; r < rows.length; r++)
-      for (let c = 0; c < rows[r].length; c++) {
-        const val = rows[r][c]
-        if (val !== '') {
-          const id = colLabel(c) + (r + 1)
-          sheet.setCell(id, String(val))
-          after[id] = String(val)
-        }
-      }
-    repopulateGrid()
-    queueOp({
-      opType: 'import', subSheet: currentSh,
-      cellRefs: _diffRefs(before, after), before, after,
-      summary: `Imported ${file.name}`,
-    })
-    markEdited()
+    await _ingestRows(rows, file.name)
     e.target.value = ''
   }
 
@@ -189,37 +197,31 @@ export function useExportImport({
     const file = e.target.files?.[0]
     if (!file) return
     const reader = new FileReader()
-    reader.onload = ev => {
-      const text    = ev.target.result
-      const rows    = _parseCSV(text)
-      const sheet   = getSheet()
-      const currentSh = sheet.getCurrentSheet()
-      const before    = {}
-      for (const id of Object.keys(sheet.getRawData(currentSh)))
-        before[id] = sheet.getCell(id, currentSh)
-      for (const id of Object.keys(sheet.getRawData(currentSh)))
-        sheet.setCell(id, '')
-      const after = {}
-      for (let r = 0; r < rows.length; r++) {
-        for (let c = 0; c < rows[r].length; c++) {
-          const id  = colLabel(c) + (r + 1)
-          const val = rows[r][c]
-          if (val !== '') { sheet.setCell(id, val); after[id] = val }
-        }
-      }
-      repopulateGrid()
-      queueOp({
-        opType: 'import', subSheet: currentSh,
-        cellRefs: _diffRefs(before, after), before, after,
-        summary: `Imported ${file.name}`,
-      })
-      history.push()      // post-mutate snapshot
+    reader.onload = async ev => {
+      const text = ev.target.result
+      const rows = _parseCSV(text)
+      await _ingestRows(rows, file.name)
+      history.push()       // post-mutate snapshot
       syncFlags()
-      isDirty.value = true  // critical: without this, the CSV import is never autosaved
+      isDirty.value = true
     }
     reader.readAsText(file)
-    // Reset so the same file can be imported again
     e.target.value = ''
+  }
+
+  // Shared post-parse pipeline: chunked map build → bulk engine write →
+  // dirty flag. No undo entry (imports replace the sheet, by design).
+  async function _ingestRows(rows, fileName) {
+    const sheet     = getSheet()
+    const grid      = getGrid()
+    const currentSh = sheet.getCurrentSheet()
+    const map       = await _rowsToCellMap(rows)
+    if (grid) grid.clearAll()
+    sheet.batchSetCells(map, currentSh)
+    markEdited()
+    // queueOp omitted on purpose — imports aren't undoable (Sheets parity)
+    // and a 100k-cell before/after snapshot was the dominant memory cost.
+    return fileName
   }
 
   return { exportCSV, exportXLSX, exportPDF, importCSV, importXLSX }

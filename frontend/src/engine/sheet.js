@@ -10,7 +10,11 @@ import { createDepsEngine } from './deps.js'
 import { renameSheetInFormula } from './formula-adjust.js'
 import { parseCellId, colLabel } from '../utils/cells.js'
 
-export function createSheet({ onCellChanged } = {}) {
+// `onCellChanged(id, displayValue, sheet)` fires once per single-cell write
+// (setCell, formula cascades). `onCellsChanged(sheet)` fires once after a
+// bulk write (batchSetCells) instead of N per-cell notifications — used by
+// imports so the host can do a single bulk repaint.
+export function createSheet({ onCellChanged, onCellsChanged } = {}) {
 	const sheets   = { Sheet1: {} }
 	const deps     = createDepsEngine()
 	let   current  = 'Sheet1'
@@ -91,6 +95,50 @@ export function createSheet({ onCellChanged } = {}) {
 		// (formulas on Sheet2 reading Sheet1!A1) get re-evaluated when the
 		// source cell on the other sheet changes.
 		for (const dep of deps.getDependents(id, sheet)) _notify(dep.cellId, dep.sheet)
+	}
+
+	// Bulk-write a whole pile of cells with one dep-graph rebuild and *no*
+	// per-cell dependent cascade. Used by imports (CSV / XLSX) where a
+	// per-cell setCell would freeze the main thread on large files —
+	// every setCell currently parses refs, walks dependents, and re-
+	// evaluates every formula touching the cell. For a 100k-row import
+	// that's 100k × O(deps) work in a tight synchronous loop.
+	//
+	// Contract: callers pass `{ id: value }` for cells that should exist
+	// AFTER the call. Anything not in the map is cleared (so imports
+	// replace the sheet rather than merge — matching today's behaviour).
+	// Returns the diff (before/after) so callers can decide whether to
+	// queue an undo op.
+	function batchSetCells(map, sheet = current, { replace = true } = {}) {
+		if (!sheets[sheet]) sheets[sheet] = {}
+		const sh = sheets[sheet]
+		const before = {}
+		const after  = {}
+		if (replace) {
+			for (const id of Object.keys(sh)) {
+				if (!(id in map)) {
+					before[id] = sh[id]
+					after[id]  = ''
+					delete sh[id]
+				}
+			}
+		}
+		for (const [id, v] of Object.entries(map)) {
+			const prev = sh[id]
+			if (v === '' || v == null) {
+				if (prev != null) { before[id] = prev; after[id] = ''; delete sh[id] }
+			} else if (prev !== v) {
+				before[id] = prev ?? ''
+				after[id]  = v
+				sh[id] = v
+			}
+		}
+		// Rebuild the dep graph for this sheet in one pass instead of
+		// per-cell register() calls. Cross-sheet inbound edges (formulas
+		// on OTHER sheets reading into this one) are preserved by deps.
+		deps.rebuild(sh, sheet)
+		if (sheet === current) onCellsChanged?.(sheet)
+		return { before, after }
 	}
 
 	function _notify(id, sheet = current) {
@@ -258,7 +306,7 @@ export function createSheet({ onCellChanged } = {}) {
 	deps.rebuild({}, 'Sheet1')
 
 	return {
-		setCell, getCell, getDisplayValue, getCellValue, getRangeValues,
+		setCell, batchSetCells, getCell, getDisplayValue, getCellValue, getRangeValues,
 		switchSheet, addSheet, renameSheet, duplicateSheet, deleteSheet, reorderSheets,
 		getSheetNames, getCurrentSheet, getRawData,
 		insertRow, deleteRow, insertCol, deleteCol,

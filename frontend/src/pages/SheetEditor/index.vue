@@ -894,6 +894,13 @@ const sheet = createSheet({
     const displayed = fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue
     grid?.setCell(id, displayed)
   },
+  // Bulk-write callback — fires once after batchSetCells (large imports).
+  // Skip the per-cell repaint cascade and use _repopulateGrid's existing
+  // bulk-fill path. condFormat stats are invalidated once instead of N times.
+  onCellsChanged() {
+    condFormat?.invalidate()
+    _repopulateGrid()
+  },
 })
 const formats    = createFormatsEngine()
 const merge      = createMergeEngine()

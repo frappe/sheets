@@ -10,6 +10,14 @@ function makeSheet(initial = {}, sheetName = 'Sheet1') {
     getRawData:       (sn = sheetName) => (void sn, store),
     getCell:          (id, sn = sheetName) => (void sn, store[id] ?? ''),
     setCell:          (id, v) => { store[id] = v },
+    // Mirror the production engine's bulk-write contract: replace the sheet
+    // with `map`, clearing keys not present. importCSV/importXLSX now use
+    // this instead of setCell-per-cell so big imports don't freeze the page.
+    batchSetCells:    (map, sn = sheetName) => {
+      void sn
+      for (const id of Object.keys(store)) if (!(id in map)) delete store[id]
+      for (const [id, v] of Object.entries(map)) store[id] = v
+    },
     getCurrentSheet:  () => sheetName,
     getSheetNames:    () => [sheetName],
     getDisplayValue:  (id, sn = sheetName) => (void sn, store[id] ?? ''),
@@ -185,83 +193,69 @@ describe('exportCSV — DOM calls', () => {
 // ── importCSV — sheet engine receives correct cells ───────────────────────────
 
 describe('importCSV', () => {
-  function runImport(csvText, sheetData = {}) {
+  // The new importer is async and yields to the event loop while building
+  // the cell map. runImport returns once the onload's async work has fully
+  // resolved so test assertions can run against the post-import state.
+  async function runImport(csvText, sheetData = {}) {
     const composable = makeComposable(sheetData)
-    // Simulate a FileReader-driven event
-    let loadHandler
     const mockReader = {
       onload: null,
-      readAsText: vi.fn(function () {
-        loadHandler = this.onload
-      }),
+      readAsText: vi.fn(),
     }
     vi.stubGlobal('FileReader', function FileReader() { return mockReader })
 
     const fakeFile = { name: 'data.csv' }
-    const event    = {
-      target: { files: [fakeFile], value: '' },
-    }
-
+    const event    = { target: { files: [fakeFile], value: '' } }
     composable.importCSV(event)
-    mockReader.onload({ target: { result: csvText } })
+    // onload returns a promise (it's async); await it so the batch write
+    // and dirty flag have settled before assertions run.
+    await mockReader.onload({ target: { result: csvText } })
     vi.unstubAllGlobals()
     return composable
   }
 
-  it('writes parsed CSV cells into the sheet engine', () => {
-    const { sheet } = runImport('foo,bar\n1,2')
+  it('writes parsed CSV cells into the sheet engine', async () => {
+    const { sheet } = await runImport('foo,bar\n1,2')
     expect(sheet.getCell('A1')).toBe('foo')
     expect(sheet.getCell('B1')).toBe('bar')
     expect(sheet.getCell('A2')).toBe('1')
     expect(sheet.getCell('B2')).toBe('2')
   })
 
-  it('does not write empty cells into the sheet', () => {
-    const { sheet } = runImport('a,,b')
+  it('does not write empty cells into the sheet', async () => {
+    const { sheet } = await runImport('a,,b')
     expect(sheet.getCell('A1')).toBe('a')
-    expect(sheet.getCell('B1')).toBe('')   // was never set by importCSV
+    expect(sheet.getCell('B1')).toBe('')   // batchSetCells skips empty values
     expect(sheet.getCell('C1')).toBe('b')
   })
 
-  it('sets isDirty to true', () => {
-    const { isDirty } = runImport('x,y')
+  it('sets isDirty to true', async () => {
+    const { isDirty } = await runImport('x,y')
     expect(isDirty.value).toBe(true)
   })
 
-  it('pushes a history snapshot', () => {
-    const { history } = runImport('x,y')
+  it('pushes a history snapshot', async () => {
+    const { history } = await runImport('x,y')
     expect(history.push).toHaveBeenCalledTimes(1)
   })
 
-  it('queues an import op with correct opType and subSheet', () => {
-    const { ops } = runImport('a,b')
-    expect(ops).toHaveLength(1)
-    expect(ops[0].opType).toBe('import')
-    expect(ops[0].subSheet).toBe('Sheet1')
+  it('does not queue an undo op — imports are non-undoable (Sheets parity)', async () => {
+    const { ops } = await runImport('a,b')
+    expect(ops).toHaveLength(0)
   })
 
-  it('calls repopulateGrid so the canvas auto-expands to fit the imported data', () => {
-    const wide = Array.from({ length: 46 }, (_, i) => `v${i}`).join(',')
-    const { repopulateGrid } = runImport(wide)
-    expect(repopulateGrid).toHaveBeenCalledTimes(1)
-  })
-
-  it('resets e.target.value so the same file can be re-imported', () => {
+  it('resets e.target.value so the same file can be re-imported', async () => {
     const fakeFile = { name: 'data.csv' }
     const event    = { target: { files: [fakeFile], value: 'old' } }
 
-    let loadHandler
-    const mockReader = {
-      onload: null,
-      readAsText: vi.fn(function () { loadHandler = this.onload }),
-    }
+    const mockReader = { onload: null, readAsText: vi.fn() }
     vi.stubGlobal('FileReader', function FileReader() { return mockReader })
 
     const composable = makeComposable()
     composable.importCSV(event)
     expect(event.target.value).toBe('')
 
-    mockReader.onload({ target: { result: '' } })
+    await mockReader.onload({ target: { result: '' } })
     vi.unstubAllGlobals()
   })
 })
