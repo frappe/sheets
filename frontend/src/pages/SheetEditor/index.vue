@@ -3085,23 +3085,35 @@ function onNavigateTo(id) {
 // ── Sort & Filter ─────────────────────────────────────────────────────────────
 
 // Expand a single anchor cell to the contiguous non-empty data block around it
-// (Google-Sheets Ctrl+A behaviour).  Returns null when the anchor itself is
-// empty so the caller can decide what to do.
+// (Google-Sheets Ctrl+A behaviour). If the anchor itself is empty, pivot to
+// the adjacent cell down/right that has data — the empty anchor then becomes
+// the header row/col of the resulting block. Returns null only when nothing
+// adjacent has data either.
 function _detectContiguousBlock(r, c) {
-  const id0 = cellId(r, c)
-  if (!String(sheet.getCell(id0) ?? '').length) return null
-  const hasVal = (rr, cc) => String(sheet.getCell(cellId(rr, cc)) ?? '').length > 0
-  let r0 = r, r1 = r, c0 = c, c1 = c
-  while (r0 > 0 && hasVal(r0 - 1, c)) r0--
-  while (hasVal(r1 + 1, c))           r1++
-  while (c0 > 0 && hasVal(r0, c0 - 1)) c0--
-  while (hasVal(r0, c1 + 1))           c1++
+  const hasVal = (rr, cc) =>
+    rr >= 0 && cc >= 0 && String(sheet.getCell(cellId(rr, cc)) ?? '').length > 0
+  const anchorEmpty = !hasVal(r, c)
+  let ar = r, ac = c
+  if (anchorEmpty) {
+    if      (hasVal(r + 1, c)) ar = r + 1
+    else if (hasVal(r, c + 1)) ac = c + 1
+    else return null
+  }
+  let r0 = ar, r1 = ar, c0 = ac, c1 = ac
+  while (r0 > 0 && hasVal(r0 - 1, ac)) r0--
+  while (hasVal(r1 + 1, ac))           r1++
+  while (c0 > 0 && hasVal(ar, c0 - 1)) c0--
+  while (hasVal(ar, c1 + 1))           c1++
   // Walk again from the new top-row left/right edges in case the block widens
   // below; this matches Google Sheets' "smart" expansion well enough for now.
   for (let rr = r0; rr <= r1; rr++) {
     while (c0 > 0 && hasVal(rr, c0 - 1)) c0--
     while (hasVal(rr, c1 + 1))           c1++
   }
+  // If the original anchor sits exactly one row above (or one col left of)
+  // the detected block, fold it in as the header row/col.
+  if (anchorEmpty && r === r0 - 1 && c >= c0 && c <= c1) r0 = r
+  if (anchorEmpty && c === c0 - 1 && r >= r0 && r <= r1) c0 = c
   return { r0, c0, r1, c1 }
 }
 
