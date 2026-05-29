@@ -130,9 +130,14 @@ def get_sheet_shares(name: str) -> list:
 	rows = frappe.get_all(
 		"DocShare",
 		filters={"share_doctype": "Sheet", "share_name": name},
-		fields=["user", "read", "write", "share"],
+		fields=["user", "read", "write", "share", "everyone"],
 	)
 	for row in rows:
+		if row.get("everyone"):
+			row["full_name"] = ""
+			row["initials"] = ""
+			row["user_image"] = ""
+			continue
 		identity = _user_identity(row["user"])
 		row.update(identity)
 		row["user_image"] = frappe.db.get_value("User", row["user"], "user_image") or ""
@@ -140,11 +145,19 @@ def get_sheet_shares(name: str) -> list:
 
 
 @frappe.whitelist()
-def share_sheet(name: str, user: str, write: int = 0) -> dict:
+def share_sheet(name: str, user: str = "", write: int = 0, everyone: int = 0) -> dict:
 	# `ptype="share"` — only users who themselves hold the share right
 	# may grant access to others. Default `read` was too permissive
 	# (any viewer could re-share a sheet to anyone).
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
+	if int(everyone or 0):
+		# "Accessible to all" → single DocShare with everyone=1, user=NULL.
+		# notify=False because there's no individual to email.
+		frappe.share.add(
+			"Sheet", name, user=None, write=int(write), share=0,
+			everyone=1, notify=False,
+		)
+		return {"status": "ok"}
 	# Reject disabled users (and non-existent ones) up front — silently
 	# carrying a share to an account that's been turned off lets it light
 	# up again the moment the account is re-enabled, which is rarely what
@@ -159,8 +172,18 @@ def share_sheet(name: str, user: str, write: int = 0) -> dict:
 
 
 @frappe.whitelist()
-def unshare_sheet(name: str, user: str) -> dict:
+def unshare_sheet(name: str, user: str = "", everyone: int = 0) -> dict:
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
+	if int(everyone or 0):
+		# frappe.share.remove() looks up by user; for the everyone row we
+		# locate the DocShare directly and delete it.
+		share_name = frappe.db.get_value(
+			"DocShare",
+			{"share_doctype": "Sheet", "share_name": name, "everyone": 1},
+		)
+		if share_name:
+			frappe.delete_doc("DocShare", share_name, ignore_permissions=True)
+		return {"status": "ok"}
 	frappe.share.remove("Sheet", name, user)
 	return {"status": "ok"}
 

@@ -190,10 +190,10 @@ async function applyGeneralAccess(type) {
   try {
     if (type === 'all') {
       await call('spreadsheet.api.share_sheet', {
-        name: props.sheetId, user: 'All', write: generalRole.value === '1' ? 1 : 0,
+        name: props.sheetId, everyone: 1, write: generalRole.value === '1' ? 1 : 0,
       })
     } else {
-      await call('spreadsheet.api.unshare_sheet', { name: props.sheetId, user: 'All' })
+      await call('spreadsheet.api.unshare_sheet', { name: props.sheetId, everyone: 1 })
     }
   } catch (err) {
     generalAccess.value = prevAccess   // revert visual state
@@ -211,8 +211,18 @@ async function fetchShares() {
   loading.value = true
   try {
     const rows = await call('spreadsheet.api.get_sheet_shares', { name: props.sheetId })
+    // The "everyone" row encodes general access; keep it out of the member
+    // list and use it to seed the General Access dropdown so the dialog
+    // reflects persisted state on re-open.
+    const everyoneRow = rows.find(r => r.everyone)
+    if (everyoneRow) {
+      generalAccess.value = 'all'
+      generalRole.value   = everyoneRow.write ? '1' : '0'
+    } else {
+      generalAccess.value = 'restricted'
+    }
     shares.value = rows
-      .filter(r => r.user !== props.ownerId && r.user !== 'All')
+      .filter(r => !r.everyone && r.user !== props.ownerId)
       .map(r => ({ ...r, write: !!r.write }))
     emit('shares-changed', shares.value.length)
   } catch (err) {
