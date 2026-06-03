@@ -47,29 +47,61 @@
       <!-- ── Members ────────────────────────────────────────────────────────── -->
       <p class="sd-label">Members</p>
 
-      <div class="sd-search-wrap">
-        <FormControl
-          v-model="searchQuery"
-          type="text"
-          placeholder="Add people..."
-          class="sd-search"
-          autocomplete="off"
-          @update:model-value="onSearchInput"
-        />
-        <div v-if="searchResults.length" class="sd-results">
-          <button
-            v-for="u in searchResults"
-            :key="u.name"
-            class="sd-result-row"
-            @mousedown.prevent="inviteUser(u)"
-          >
-            <Avatar :label="u.initials" :image="u.user_image || undefined" size="sm" />
-            <div class="sd-result-info">
-              <span class="sd-result-name">{{ u.full_name }}</span>
-              <span class="sd-result-email">{{ u.name }}</span>
-            </div>
-          </button>
+      <!-- Stage row: chips for users pending invite + free-text search input
+           on the left; the role dropdown on the right applies to the whole
+           batch on Invite. Drive-style — nothing commits until the user
+           clicks "Invite" in the actions row. -->
+      <div class="sd-stage-row">
+        <div class="sd-stage-wrap sd-search-wrap" :class="{ 'sd-stage-wrap--has-chips': staged.length }">
+          <div v-for="(c, i) in staged" :key="c.user" class="sd-chip">
+            <Avatar :label="c.initials" :image="c.user_image || undefined" size="xs" />
+            <span class="sd-chip-text">{{ c.user }}</span>
+            <button
+              type="button"
+              class="sd-chip-x"
+              aria-label="Remove"
+              @click.stop="removeChip(i)"
+            >×</button>
+          </div>
+          <input
+            v-model="searchQuery"
+            type="text"
+            class="sd-stage-input"
+            :placeholder="staged.length ? '' : 'Add people...'"
+            autocomplete="off"
+            @input="e => onSearchInput(e.target.value)"
+            @keydown.backspace="onStageBackspace"
+          />
+          <div v-if="searchResults.length" class="sd-results">
+            <button
+              v-for="u in searchResults"
+              :key="u.name"
+              class="sd-result-row"
+              @mousedown.prevent="addChip(u)"
+            >
+              <Avatar :label="u.initials" :image="u.user_image || undefined" size="sm" />
+              <div class="sd-result-info">
+                <span class="sd-result-name">{{ u.full_name }}</span>
+                <span class="sd-result-email">{{ u.name }}</span>
+              </div>
+            </button>
+          </div>
         </div>
+
+        <!-- Role for the staged batch — shown only when there is something
+             to invite, mirroring Drive's behaviour. -->
+        <Dropdown v-if="staged.length" :options="pendingRoleOpts" placement="bottom-end">
+          <template #default>
+            <Button
+              variant="outline"
+              size="sm"
+              icon-left="eye"
+              icon-right="chevron-down"
+              :label="pendingRole === '1' ? 'Can edit' : 'Can view'"
+              class="sd-pill-btn"
+            />
+          </template>
+        </Dropdown>
       </div>
 
       <!-- Member list -->
@@ -110,7 +142,15 @@
 
     <template #actions>
       <div class="flex flex-row-reverse gap-2">
-        <Button variant="outline" size="sm" icon="link-2" label="Copy link" @click="copyLink" />
+        <Button
+          variant="solid"
+          size="sm"
+          label="Invite"
+          :loading="inviting"
+          :disabled="!staged.length || inviting"
+          @click="inviteStaged"
+        />
+        <Button variant="outline" size="sm" icon-left="link-2" label="Copy link" @click="copyLink" />
       </div>
     </template>
   </Dialog>
@@ -141,6 +181,10 @@ const dialogTitle = computed(() => `Sharing "${props.sheetTitle || 'Untitled Spr
 watch(show, (open) => {
   if (open) {
     errorMessage.value = ''
+    staged.value      = []
+    pendingRole.value = '0'
+    searchQuery.value = ''
+    searchResults.value = []
     fetchShares()
   }
 })
@@ -290,7 +334,12 @@ async function searchUsers(q) {
       fields: ['name', 'full_name', 'user_image'],
       limit: 6,
     })
-    const existing = new Set(shares.value.map(s => s.user))
+    // Exclude both existing members and users already staged as chips so
+    // the same person can't be added twice.
+    const existing = new Set([
+      ...shares.value.map(s => s.user),
+      ...staged.value.map(c => c.user),
+    ])
     searchResults.value = rows
       .filter(r => !existing.has(r.name))
       .map(r => ({
@@ -300,19 +349,67 @@ async function searchUsers(q) {
   } catch (_) { searchResults.value = [] }
 }
 
-async function inviteUser(u) {
+// ── chip staging ───────────────────────────────────────────────────────────
+//
+// Drive's UX: search results add a *chip* to the input rather than committing
+// the share. The user can stage several people, pick a single role for the
+// batch, and click "Invite" to fan out share_sheet calls in one go. This
+// reduces notification noise (each invitee gets one email instead of N)
+// and makes the role choice deliberate.
+
+const staged      = ref([])         // [{ user, full_name, user_image, initials }]
+const pendingRole = ref('0')        // '0' = Can view, '1' = Can edit
+const inviting    = ref(false)
+
+const pendingRoleOpts = computed(() => [
+  { label: 'Can view', onClick: () => { pendingRole.value = '0' } },
+  { label: 'Can edit', onClick: () => { pendingRole.value = '1' } },
+])
+
+function addChip(u) {
+  staged.value.push({
+    user: u.name, full_name: u.full_name, user_image: u.user_image, initials: u.initials,
+  })
   searchQuery.value   = ''
   searchResults.value = []
-  const entry = { user: u.name, full_name: u.full_name, user_image: u.user_image,
-                  initials: u.initials, write: false }
-  shares.value.push(entry)
-  emit('shares-changed', shares.value.length)
+}
+
+function removeChip(i) { staged.value.splice(i, 1) }
+
+// Backspace in an empty input pops the last chip — small ergonomic win
+// users expect from chip-style inputs (Gmail, Drive, Linear, etc.).
+function onStageBackspace(e) {
+  if (!searchQuery.value && staged.value.length) {
+    e.preventDefault()
+    staged.value.pop()
+  }
+}
+
+async function inviteStaged() {
+  if (!staged.value.length || inviting.value) return
+  inviting.value = true
+  const write = pendingRole.value === '1' ? 1 : 0
+  const failed = []
   try {
-    await call('spreadsheet.api.share_sheet', { name: props.sheetId, user: u.name, write: 0 })
-  } catch (err) {
-    shares.value = shares.value.filter(s => s.user !== u.name)
-    emit('shares-changed', shares.value.length)
-    _flashError(err)
+    // Sequential rather than Promise.all so a single failure surfaces a
+    // useful per-user error message instead of getting drowned by a
+    // hard-to-read aggregate rejection.
+    for (const c of staged.value) {
+      try {
+        await call('spreadsheet.api.share_sheet', { name: props.sheetId, user: c.user, write })
+      } catch (err) {
+        failed.push({ chip: c, err })
+      }
+    }
+    // Keep the chips that failed so the user can see what didn't go
+    // through; drop the successful ones.
+    staged.value = failed.map(f => f.chip)
+    if (failed.length) {
+      _flashError(failed[0].err)
+    }
+    await fetchShares()
+  } finally {
+    inviting.value = false
   }
 }
 
@@ -344,18 +441,67 @@ async function copyLink() {
 /* ── Divider ── */
 .sd-divider { height: 1px; background: var(--outline-gray-1); margin: 16px 0; }
 
-/* ── Search ── */
-.sd-search-wrap { position: relative; margin-bottom: 4px; }
-
-/* Restyle the FormControl input to a pill shape with gray fill */
-.sd-search :deep(input) {
-  border-radius: 999px;
-  background: var(--surface-gray-2);
-  border-color: transparent;
-  padding-left: 16px;
+/* ── Stage row (chips + input + role) ── */
+.sd-stage-row {
+  display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px;
 }
-.sd-search :deep(input:hover) { background: var(--surface-gray-3); border-color: transparent; }
-.sd-search :deep(input:focus) { background: var(--surface-gray-3); border-color: var(--outline-gray-3); }
+
+/* Pill-shaped wrapper holds the chips inline with the free-text input.
+   Background and focus styling mimic the prior FormControl-based search
+   so existing visual language is preserved. */
+.sd-stage-wrap {
+  flex: 1; min-width: 0; position: relative;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface-gray-2);
+  border: 1px solid transparent;
+  border-radius: 18px;
+  transition: background-color .1s, border-color .1s;
+}
+.sd-stage-wrap:hover        { background: var(--surface-gray-3); }
+.sd-stage-wrap:focus-within { background: var(--surface-gray-3); }
+
+/* When chips are present, give the wrapper a touch more vertical padding
+   so the chips don't kiss the edge. */
+.sd-stage-wrap--has-chips { padding: 5px 8px; }
+
+.sd-stage-input {
+  flex: 1; min-width: 80px;
+  border: 0; background: transparent;
+  font-size: 13px; color: var(--ink-gray-9);
+  padding: 2px 4px;
+}
+/* Belt-and-braces: some global styles (frappe-ui, browser default) add a
+   blue outline/box-shadow on focused inputs — strip them so only our
+   wrapper background communicates focus. */
+.sd-stage-input:focus,
+.sd-stage-input:focus-visible { outline: none !important; box-shadow: none !important; }
+.sd-stage-input::placeholder { color: var(--ink-gray-5); }
+
+/* Individual chip pill */
+.sd-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-white);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 999px;
+  padding: 2px 6px 2px 4px;
+  font-size: 12px; color: var(--ink-gray-8);
+  max-width: 240px;
+}
+.sd-chip-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 180px;
+}
+.sd-chip-x {
+  border: 0; background: transparent; cursor: pointer;
+  font-size: 14px; line-height: 1; color: var(--ink-gray-5);
+  padding: 0 2px; border-radius: 4px;
+}
+.sd-chip-x:hover { color: var(--ink-gray-8); background: var(--surface-gray-2); }
+
+/* Generic search-wrap class kept so the absolute-positioned results
+   popover continues to anchor correctly. */
+.sd-search-wrap { position: relative; }
 
 /* Search results popover */
 .sd-results {
