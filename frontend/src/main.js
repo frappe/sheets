@@ -18,6 +18,14 @@ for (const c of [TooltipProvider, TooltipRoot]) {
   if (c?.props?.delayDuration) c.props.delayDuration.default = 300
 }
 
+// frappe-ui 1.0-beta changed FormControl's default `variant` from outline
+// to `subtle` (gray fill, no border). Revert globally so every input across
+// the app keeps the previous bordered look — touching ~30 call sites is
+// worse than overriding the prop default at registration time.
+if (FormControl?.props?.variant) {
+  FormControl.props.variant.default = 'outline'
+}
+
 const app = createApp(App)
 
 app.component('Button', Button)

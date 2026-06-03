@@ -22,44 +22,51 @@
         </svg>
         <span class="home-brand-name">Frappe Sheets</span>
       </div>
-      <!-- Inline error banner — destructive actions (delete / duplicate)
-           use this instead of `window.alert` so the chrome stays in-app
-           and Espresso-themed. Auto-clears after 4 s. -->
-      <Badge v-if="errorMessage" theme="red" variant="subtle" size="sm" :label="errorMessage" />
-      <FormControl
-        type="text"
-        size="sm"
-        class="home-search"
-        v-model="searchQuery"
-        placeholder="Search spreadsheets…"
-      >
-        <template #prefix>
-          <FeatherIcon name="search" class="home-search-icon" />
-        </template>
-      </FormControl>
-      <!-- View-mode toggle: grid (card) vs list. State persists in
-           localStorage so the user's choice survives reloads. Uses two
-           Frappe UI Buttons inside a thin segmented frame; the active
-           one switches to `subtle` so it inverts against the row. -->
-      <div class="home-viewtoggle" role="tablist" aria-label="View mode">
-        <Button
-          :variant="viewMode === 'grid' ? 'subtle' : 'ghost'"
-          size="sm" icon="grid"
-          tooltip="Grid view"
-          role="tab"
-          :aria-selected="viewMode === 'grid'"
-          @click="setViewMode('grid')"
-        />
-        <Button
-          :variant="viewMode === 'list' ? 'subtle' : 'ghost'"
-          size="sm" icon="list"
-          tooltip="List view"
-          role="tab"
-          :aria-selected="viewMode === 'list'"
-          @click="setViewMode('list')"
-        />
+      <!-- Right-aligned controls. Wrapped in an explicit container with
+           `margin-left: auto` because frappe-ui 1.0-beta's TextInput
+           renders extra DOM around the input — relying on margin-left
+           on the FormControl itself no longer reliably pushes the
+           cluster to the right edge. -->
+      <div class="home-topbar-right">
+        <!-- Inline error banner — destructive actions (delete / duplicate)
+             use this instead of `window.alert` so the chrome stays in-app
+             and Espresso-themed. Auto-clears after 4 s. -->
+        <Badge v-if="errorMessage" theme="red" variant="subtle" size="sm" :label="errorMessage" />
+        <FormControl
+          type="text"
+          size="sm"
+          class="home-search"
+          v-model="searchQuery"
+          placeholder="Search spreadsheets…"
+        >
+          <template #prefix>
+            <FeatherIcon name="search" class="home-search-icon" />
+          </template>
+        </FormControl>
+        <!-- View-mode toggle: grid (card) vs list. State persists in
+             localStorage so the user's choice survives reloads. Uses two
+             Frappe UI Buttons inside a thin segmented frame; the active
+             one switches to `subtle` so it inverts against the row. -->
+        <div class="home-viewtoggle" role="tablist" aria-label="View mode">
+          <Button
+            :variant="viewMode === 'grid' ? 'subtle' : 'ghost'"
+            size="sm" icon="grid"
+            tooltip="Grid view"
+            role="tab"
+            :aria-selected="viewMode === 'grid'"
+            @click="setViewMode('grid')"
+          />
+          <Button
+            :variant="viewMode === 'list' ? 'subtle' : 'ghost'"
+            size="sm" icon="list"
+            tooltip="List view"
+            role="tab"
+            :aria-selected="viewMode === 'list'"
+            @click="setViewMode('list')"
+          />
+        </div>
+        <Button variant="solid" @click="emit('new')">New Spreadsheet</Button>
       </div>
-      <Button variant="solid" @click="emit('new')">New Spreadsheet</Button>
     </div>
 
     <!-- Content -->
@@ -328,7 +335,7 @@ const listColumns = [
 const listOptions = computed(() => ({
   selectable: false,
   showTooltip: true,
-  rowHeight: 52,
+  rowHeight: 40,
   onRowClick: (row) => emit('open', row.name),
   emptyState: searchQuery.value
     ? {
@@ -488,8 +495,18 @@ async function duplicate(sheet) {
   flex-shrink: 0;
 }
 
+/* Right-aligned cluster: search + view toggle + New Spreadsheet button.
+   `margin-left: auto` pushes the whole group to the right edge, leaving
+   the brand mark anchored at the left. */
+.home-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
 /* Search input — compact, fixed 220px so it doesn't dominate the topbar. */
-.home-search       { width: 220px; margin-left: auto; }
+.home-search       { width: 220px; }
 .home-search :deep(input) { height: 28px; font-size: 13px; }
 .home-search-icon  { width: 13px; height: 13px; color: var(--ink-gray-5); }
 
