@@ -346,6 +346,37 @@ describe('useCollaboration — remoteCursors from awareness', () => {
 		expect(remoteCursors.value.size).toBe(0)
 	})
 
+	it('exposes firstName on the cursor for the GS-style name flag', async () => {
+		const { realtime, remoteCursors } = makeDeps()
+		emitRemoteAwareness(realtime, {
+			from: 'peer-bob',
+			state: {
+				user:   { id: 'bob@example.com', fullName: 'Bob Smith', initials: 'BS' },
+				cursor: { row: 1, col: 1, subSheet: 'Sheet1' },
+			},
+		})
+		await flush()
+		expect(remoteCursors.value.get('bob@example.com').firstName).toBe('Bob')
+	})
+
+	it('propagates a peer\'s current sub_sheet onto presentUsers for tab indicators', async () => {
+		const { realtime, presentUsers } = makeDeps()
+		emitRemoteAwareness(realtime, {
+			from: 'peer-bob',
+			state: {
+				user:   { id: 'bob@example.com', fullName: 'Bob', initials: 'B' },
+				cursor: { row: 0, col: 0, subSheet: 'Sheet2' },
+			},
+		})
+		await flush()
+		expect(presentUsers.value[0].sub_sheet).toBe('Sheet2')
+		expect(presentUsers.value[0].first_name).toBe('Bob')
+		// The avatar pile colours each peer by their cursor colour — keep
+		// the contract that presentUsers carries that colour, not just
+		// the cursors map.
+		expect(CURSOR_PALETTE).toContain(presentUsers.value[0].color)
+	})
+
 	it('clears remoteCursors on stop', async () => {
 		const { realtime, remoteCursors, watchCallback } = makeDeps()
 		emitRemoteAwareness(realtime, {

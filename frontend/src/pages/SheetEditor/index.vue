@@ -66,7 +66,9 @@
                 @click="vhOpen ? closeVersionHistory() : (notesPanel.open = false, openVersionHistory())" />
         <Button variant="ghost" size="sm" icon="help-circle" tooltip="Keyboard shortcuts (?)" @click="showShortcutsHelp = true" />
         <span class="sn-topbar-divider" aria-hidden="true" />
-        <!-- Presence avatars — other users currently viewing this sheet -->
+        <!-- Presence avatars — other users currently in the workbook.
+             Outline = their cursor color; tooltip says which sub-sheet
+             they're on so cross-sheet collaborators are discoverable. -->
         <div v-if="presentUsers.length" class="sn-presence">
           <Avatar
             v-for="u in presentUsers.slice(0, 3)"
@@ -74,8 +76,11 @@
             :label="u.initials"
             :image="u.user_image || undefined"
             size="sm"
-            :tooltip="u.full_name"
+            :tooltip="u.sub_sheet && u.sub_sheet !== currentSheet
+              ? `${u.full_name} — on ${u.sub_sheet}`
+              : u.full_name"
             class="sn-presence-avatar"
+            :style="{ '--rc': u.color }"
           />
           <span
             v-if="presentUsers.length > 3"
@@ -352,15 +357,19 @@
         </button>
       </div>
 
-      <!-- Remote cursor overlays — one per peer on the same sub-sheet -->
+      <!-- Remote cursor overlays — one per peer on the same sub-sheet.
+           `data-moved` flips when the peer's (row,col) actually changes so
+           the CSS only animates left/top/width/height on real motion, not
+           on the local viewport scroll. -->
       <div
         v-for="cur in visibleRemoteCursors"
         :key="cur.user"
         class="sn-remote-cursor"
+        :class="{ 'sn-remote-cursor--moved': cur.justMoved }"
         :style="cur.style"
         :title="cur.fullName"
       >
-        <span class="sn-remote-cursor-label">{{ cur.initials }}</span>
+        <span class="sn-remote-cursor-label">{{ cur.firstName }}</span>
       </div>
 
       <!-- Pivot FAB — floats below the Grand Total row, like Google Sheets -->
@@ -450,6 +459,26 @@
             class="sn-tab-chevron"
             @click.stop="openTabMenu($event, name)"
           />
+          <!-- Peer dots — one colored circle per peer currently on this
+               tab. Capped at 3 + a "+N" overflow so a busy tab doesn't
+               blow out the tab's width. -->
+          <span
+            v-if="peersBySubSheet.get(name)?.length"
+            class="sn-tab-peers"
+          >
+            <span
+              v-for="p in peersBySubSheet.get(name).slice(0, 3)"
+              :key="p.user"
+              class="sn-tab-peer-dot"
+              :style="{ '--rc': p.color }"
+              :title="p.full_name"
+            />
+            <span
+              v-if="peersBySubSheet.get(name).length > 3"
+              class="sn-tab-peer-more"
+              :title="`${peersBySubSheet.get(name).length - 3} more`"
+            >+{{ peersBySubSheet.get(name).length - 3 }}</span>
+          </span>
         </div>
 
         <Button variant="ghost" size="sm" icon="plus" class="sn-tab-add" tooltip="Add sheet" @click="addSheet" />
@@ -1976,11 +2005,34 @@ const visibleFilterCols = computed(() => {
   }))
 })
 
+// Per-sub-sheet peer dots — small colored circles next to each tab label
+// so you can see at a glance who's looking at which tab without having
+// to switch. Caps at 3 dots + "+N" overflow per tab.
+const peersBySubSheet = computed(() => {
+  const out = new Map()  // name → Array<{user, color, full_name}>
+  for (const u of presentUsers.value) {
+    if (!u.sub_sheet) continue
+    if (!out.has(u.sub_sheet)) out.set(u.sub_sheet, [])
+    out.get(u.sub_sheet).push(u)
+  }
+  return out
+})
+
+// Per-user memory of the last-seen remote (row, col, subSheet) so we can
+// tell "the peer actually moved" from "the local viewport scrolled". The
+// CSS transition on `.sn-remote-cursor--moved` only fires on real motion.
+const _lastRemoteRC = new Map()  // user → 'r:c:subSheet'
+
 // Remote cursors for users on the same sheet — re-evaluated when the canvas renders
 // (renderVersion) or when remoteCursors updates.
 const visibleRemoteCursors = computed(() => {
   renderVersion.value
   if (!grid) return []
+  // Prune lastRC entries for peers that left so the Map doesn't grow
+  // unbounded as users come and go through a long session.
+  for (const user of _lastRemoteRC.keys()) {
+    if (!remoteCursors.value.has(user)) _lastRemoteRC.delete(user)
+  }
   return [...remoteCursors.value.entries()]
     .filter(([, cursor]) => cursor.subSheet === currentSheet.value)
     .map(([user, cursor]) => {
@@ -1994,8 +2046,22 @@ const visibleRemoteCursors = computed(() => {
       if (!tl || !br) return null
       const width  = (br.x + br.width)  - tl.x
       const height = (br.y + br.height) - tl.y
+      // Motion detection: the row/col/subSheet stamp is what determines
+      // whether the *peer* moved. If the stamp is unchanged but the pixel
+      // rect differs, that's a local scroll/resize — we leave justMoved
+      // false so the cursor teleports with the viewport rather than
+      // sliding under the user's mouse.
+      const stamp = `${cursor.row}:${cursor.col}:${cursor.subSheet}`
+      const prev  = _lastRemoteRC.get(user)
+      const justMoved = prev !== undefined && prev !== stamp
+      _lastRemoteRC.set(user, stamp)
       return {
-        user, initials: cursor.initials, color: cursor.color, fullName: cursor.fullName,
+        user,
+        firstName: cursor.firstName || cursor.initials,
+        initials:  cursor.initials,
+        color:     cursor.color,
+        fullName:  cursor.fullName,
+        justMoved,
         style: {
           left:   tl.x + 'px',
           top:    tl.y + 'px',
@@ -3896,7 +3962,15 @@ function toggleShowFormulas() {
 /* Presence avatars — stacked/overlapping, each with a white ring so they
    visually separate even when colors are similar. */
 .sn-presence { display:inline-flex; align-items:center; }
-.sn-presence-avatar { margin-left:-6px; border-radius:50%; outline:2px solid var(--surface-white); }
+.sn-presence-avatar {
+  margin-left:-6px; border-radius:50%;
+  /* Outer ring = surface bg so the stack reads as overlapping pebbles;
+     inner ring = the peer's cursor color so the avatar matches their
+     cursor outline at a glance. `box-shadow` stacks two rings without
+     pushing layout. */
+  box-shadow: 0 0 0 2px var(--surface-white),
+              0 0 0 4px var(--rc, var(--outline-gray-2));
+}
 .sn-presence-avatar:first-child { margin-left:0; }
 .sn-presence-more {
   display:inline-flex; align-items:center; justify-content:center;
@@ -4035,8 +4109,22 @@ function toggleShowFormulas() {
   position:absolute; pointer-events:none; box-sizing:border-box;
   border:2px solid var(--rc);
   background: color-mix(in srgb, var(--rc) 10%, transparent);
+  /* Default: no animation. The class below opts in for one paint cycle
+     when the peer actually changes cells (vs. local scroll). */
+  transition: none;
 }
-.sn-remote-cursor-label { position:absolute; top:-18px; left:-1px; background:var(--rc); color:var(--surface-white); font-size:10px; font-weight:600; padding:1px 4px; border-radius:3px 3px 3px 0; white-space:nowrap; line-height:16px; }
+.sn-remote-cursor--moved {
+  transition: left .12s ease-out, top .12s ease-out,
+              width .12s ease-out, height .12s ease-out;
+}
+.sn-remote-cursor-label {
+  position:absolute; top:-18px; left:-1px;
+  background:var(--rc); color:var(--surface-white);
+  font-size:10px; font-weight:600;
+  padding:1px 5px; border-radius:3px 3px 3px 0;
+  white-space:nowrap; line-height:16px;
+  max-width:140px; overflow:hidden; text-overflow:ellipsis;
+}
 
 .sn-filter-panel { position:absolute; z-index:100; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 0 1px rgba(0,0,0,.35), 0 6px 8px -4px rgba(0,0,0,.1); padding:12px; width:232px; display:flex; flex-direction:column; gap:8px; }
 .sn-fp-title   { font-size:12px; font-weight:600; letter-spacing:.02em; color:var(--ink-gray-8); padding-bottom:2px; }
@@ -4090,6 +4178,25 @@ function toggleShowFormulas() {
 
 /* Pivot icon tint */
 .sn-tab--pivot .sn-tab-btn :deep(.icon) { color:var(--ink-cyan-7, #0e7490); }
+
+/* ── Per-tab peer dots ──────────────────────────────────────────────────
+   One coloured circle per remote user currently looking at this tab.
+   Sits in the tab's right edge, before the chevron when the tab is
+   active. Capped to 3 visible + "+N" overflow so a popular tab can't
+   blow out the tabs track. */
+.sn-tab-peers {
+  display:inline-flex; align-items:center; gap:2px;
+  margin-right:6px; pointer-events:auto;
+}
+.sn-tab-peer-dot {
+  display:inline-block; width:7px; height:7px;
+  border-radius:50%; background:var(--rc);
+  box-shadow:0 0 0 1px var(--surface-white);
+}
+.sn-tab-peer-more {
+  font-size:9px; font-weight:600; color:var(--ink-gray-7);
+  margin-left:2px; line-height:1;
+}
 
 /* Chevron — active-tab only, sits flush against the label inside the
    same pill so the two read as one button. */

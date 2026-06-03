@@ -45,6 +45,42 @@ function hashUserColor(user) {
   return CURSOR_PALETTE[Math.abs(hash) % CURSOR_PALETTE.length]
 }
 
+// First name (or initials if the full name only has one word) — what
+// Google Sheets paints as the cursor label. We prefer first names because
+// they read at a glance and aren't redundant with the avatar's initials.
+function _firstName(fullName, initials) {
+  const first = String(fullName || '').trim().split(/\s+/)[0]
+  return first || initials || '?'
+}
+
+// Throttle cursor broadcasts so a drag-selection across 30 cells doesn't
+// emit 30 awareness frames. 60ms ≈ one frame; leading-edge means the
+// first move is instant, trailing-edge means the final resting position
+// is guaranteed to publish.
+const CURSOR_BROADCAST_MS = 60
+
+function _throttle(fn, wait) {
+  let last = 0
+  let timer = null
+  let pending = null
+  function flush() {
+    last = Date.now()
+    timer = null
+    if (pending) { fn(...pending); pending = null }
+  }
+  return function (...args) {
+    const now = Date.now()
+    const remaining = wait - (now - last)
+    pending = args
+    if (remaining <= 0) {
+      if (timer) { clearTimeout(timer); timer = null }
+      flush()
+    } else if (!timer) {
+      timer = setTimeout(flush, remaining)
+    }
+  }
+}
+
 /**
  * Unified collaboration composable powered by a Yjs document per sheet.
  *
@@ -105,11 +141,8 @@ export function useCollaboration({
     // Same reasoning as broadcastCellChange.
   }
 
-  function broadcastCursor(row, col, subSheet, range = null) {
-    // `range` is the full selection rectangle ({r0,c0,r1,c1}); peers paint
-    // it as the "where this user is selected" outline. If absent (e.g.
-    // legacy callers), the remote painter falls back to a single-cell rect
-    // at the anchor.
+  // Raw, un-throttled write to awareness. Wrapped below for the public API.
+  function _publishCursor(row, col, subSheet, range) {
     if (!_awareness) return
     const cursor = { row, col, range, subSheet }
     // y-protocols Awareness uses setLocalStateField for one-key patches;
@@ -120,6 +153,16 @@ export function useCollaboration({
     } else {
       _awareness.setLocalState({ cursor })
     }
+  }
+
+  const _publishCursorThrottled = _throttle(_publishCursor, CURSOR_BROADCAST_MS)
+
+  function broadcastCursor(row, col, subSheet, range = null) {
+    // `range` is the full selection rectangle ({r0,c0,r1,c1}); peers paint
+    // it as the "where this user is selected" outline. If absent (e.g.
+    // legacy callers), the remote painter falls back to a single-cell rect
+    // at the anchor.
+    _publishCursorThrottled(row, col, subSheet, range)
   }
 
   // ── Awareness → reactive refs ───────────────────────────────────────────────
@@ -134,13 +177,21 @@ export function useCollaboration({
     for (const state of peers.values()) {
       const user = state?.user
       if (!user || !user.id || user.id === _self) continue
+      const color = hashUserColor(user.id)
+      const subSheet = state?.cursor?.subSheet || null
       if (!seen.has(user.id)) {
         seen.add(user.id)
         users.push({
           user:        user.id,
           full_name:   user.fullName,
+          first_name:  _firstName(user.fullName, user.initials),
           initials:    user.initials,
           user_image:  user.image,
+          color,
+          // Sub-sheet the peer is currently looking at. Lets the topbar
+          // avatar pile show a small "on Sheet2" badge and powers the
+          // per-tab dot indicators.
+          sub_sheet:   subSheet,
         })
       }
       if (state.cursor) {
@@ -149,13 +200,14 @@ export function useCollaboration({
         const c = state.cursor
         const range = c.range || { r0: c.row, c0: c.col, r1: c.row, c1: c.col }
         cursors.set(user.id, {
-          row:      c.row,
-          col:      c.col,
+          row:        c.row,
+          col:        c.col,
           range,
-          subSheet: c.subSheet,
-          color:    hashUserColor(user.id),
-          fullName: user.fullName,
-          initials: user.initials,
+          subSheet:   c.subSheet,
+          color,
+          fullName:   user.fullName,
+          firstName:  _firstName(user.fullName, user.initials),
+          initials:   user.initials,
         })
       }
     }
