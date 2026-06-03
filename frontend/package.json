@@ -16,6 +16,7 @@
     "ci": "vitest run && vite build && node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
+    "@hocuspocus/provider": "^4.1.0",
     "@vitejs/plugin-vue": "^6.0.6",
     "chart.js": "^4.5.1",
     "echarts": "^6.1.0",

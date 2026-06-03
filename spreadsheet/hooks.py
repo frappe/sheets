@@ -139,6 +139,9 @@ has_permission = {
 	"Sheet Snapshot": "spreadsheet.permissions.sheet_snapshot_has_permission",
 }
 
+# Surface site_config-driven collab flags to the browser via frappe.boot.
+extend_bootinfo = "spreadsheet.boot.extend_bootinfo"
+
 # Document Events
 # ---------------
 # Hook on document methods and events
