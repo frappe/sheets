@@ -93,7 +93,13 @@
           @click="shareOpen = true"
         />
         <span class="sn-topbar-divider" aria-hidden="true" />
-        <Avatar :label="userInitial" size="sm" :tooltip="userEmail" class="sn-user-avatar" />
+        <Avatar
+          :label="userInitial"
+          :image="userImage || undefined"
+          size="sm"
+          :tooltip="userFullName || userEmail"
+          class="sn-user-avatar"
+        />
       </div>
     </div>
 
@@ -1413,14 +1419,29 @@ const titleInputWidth = computed(() => {
 })
 
 
-// window.frappe.session is hydrated by Frappe's boot script which may not
-// have finished when this module evaluates (especially on portal routes /
-// post-login redirects on Frappe Cloud). Read it lazily into a ref and
-// refresh on mount so the avatar reflects the actual logged-in user
-// instead of the "U" fallback.
-const userEmail   = ref(window.frappe?.session?.user || '')
-const userInitial = computed(() => (userEmail.value ? userEmail.value[0] : 'U').toUpperCase())
-onMounted(() => { userEmail.value = window.frappe?.session?.user || userEmail.value })
+// window.frappe is now seeded by spreadsheet.html (see www/spreadsheet.py).
+// Read it lazily into refs and refresh on mount so the avatar reflects
+// the actual logged-in user instead of the "U" fallback if Frappe's
+// own boot script later re-populates the global.
+const userEmail    = ref(window.frappe?.session?.user || '')
+const userFullName = ref(window.frappe?.session?.user_fullname || '')
+const userImage    = ref(window.frappe?.session?.user_image || '')
+const userInitial  = computed(() => {
+  // Prefer initials from full name ("Asif Mulani" → "AM"); fall back to
+  // the first letter of the email, then the literal "U" so the avatar
+  // never collapses into something empty.
+  const fn = userFullName.value.trim()
+  if (fn) {
+    const parts = fn.split(/\s+/)
+    return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
+  }
+  return (userEmail.value ? userEmail.value[0] : 'U').toUpperCase()
+})
+onMounted(() => {
+  userEmail.value    = window.frappe?.session?.user          || userEmail.value
+  userFullName.value = window.frappe?.session?.user_fullname || userFullName.value
+  userImage.value    = window.frappe?.session?.user_image    || userImage.value
+})
 
 // Collaboration — presence + sharing
 const shareOpen   = ref(false)

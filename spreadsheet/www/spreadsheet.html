@@ -10,6 +10,16 @@
 <body>
   <script>
     window.csrf_token = "{{ csrf_token }}";
+    // Minimal `window.frappe` shim so the SPA can render the logged-in
+    // user (top-right avatar, ShareDialog owner row) without depending
+    // on desk-only boot scripts.
+    window.frappe = {
+      session: {
+        user: {{ session_user | tojson }},
+        user_fullname: {{ session_user_fullname | tojson }},
+        user_image: {{ session_user_image | tojson }},
+      },
+    };
   </script>
   <div id="root"></div>
   <script type="module" src="/assets/spreadsheet/spreadsheet/index.js"></script>
