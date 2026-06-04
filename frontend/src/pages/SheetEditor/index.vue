@@ -1786,7 +1786,7 @@ const {
   isPivotSheet, openPivotDialog, onPivotEdit, onPivotRefresh, onPivotDelete, onPivotConfirm,
   recomputePivotsForSheet,
 } = usePivotIntegration({
-  pivot, sheet, currentSheet, renderVersion,
+  pivot, sheet, formats, currentSheet, renderVersion,
   getGrid: () => grid,
   contextMenu, switchSheet, syncNames,
   history, isDirty, repopulateGrid: _repopulateGrid,

@@ -1,7 +1,11 @@
 import { ref, computed, watch } from 'vue'
 import { computePivot, writePivotToSheet } from '../../engine/pivot.js'
-import { colLabel } from '../../utils/cells.js'
+import { colLabel, cellId } from '../../utils/cells.js'
 import { COL_HEADER_H, ROW_HEADER_W } from '../../canvas/constants.js'
+
+// Styling applied to the pivot's column header row (row 0) and Grand Total
+// row (last row). Matches the Google Sheets look the user asked for.
+const PIVOT_HEADER_FORMAT = { bold: true, backgroundColor: '#d9e0e8' }
 
 /**
  * @param {{
@@ -19,7 +23,7 @@ import { COL_HEADER_H, ROW_HEADER_W } from '../../canvas/constants.js'
  * }} opts
  */
 export function usePivotIntegration({
-  pivot, sheet, currentSheet, renderVersion, getGrid,
+  pivot, sheet, formats, currentSheet, renderVersion, getGrid,
   contextMenu, switchSheet, syncNames,
   history, isDirty, repopulateGrid,
 }) {
@@ -62,6 +66,11 @@ export function usePivotIntegration({
   // computePivot() to derive dimensions. We don't go through _applyPivotOutput
   // because its setCell writes would bump renderVersion and could mark the
   // sheet dirty even though the cells already match the saved snapshot.
+  //
+  // Also (re-)apply the header/total banding so older pivots created before
+  // this styling existed pick it up the first time they're opened. formats.set
+  // is idempotent and doesn't mark isDirty by itself, so this is safe to run
+  // on every activation.
   watch(activePivotConfig, (cfg) => {
     if (!cfg) {
       _pivotRowCount.value = 0
@@ -71,6 +80,7 @@ export function usePivotIntegration({
     const table = computePivot(cfg, (s, e, sh) => sheet.getRangeValues(s, e, sh))
     _pivotRowCount.value = table.length
     _pivotColCount.value = table[0]?.length || 0
+    _styleHeaderAndTotal(table, cfg.outputSheet)
   }, { immediate: true })
 
   // Positions the edit FAB below the Grand Total row without re-running
@@ -171,7 +181,12 @@ export function usePivotIntegration({
 
   function _clearPivotOutputSheet(sheetName) {
     const data = sheet.getRawData(sheetName)
-    for (const id of Object.keys(data)) sheet.setCell(id, '', sheetName)
+    for (const id of Object.keys(data)) {
+      sheet.setCell(id, '', sheetName)
+      // Clear the format too — otherwise the previous header/total band
+      // lingers on rows the new (shorter) pivot no longer occupies.
+      formats?.clear?.(id, sheetName)
+    }
   }
 
   function _applyPivotOutput(config) {
@@ -183,6 +198,24 @@ export function usePivotIntegration({
       (id, val, sh) => sheet.setCell(id, val, sh),
       shName => _clearPivotOutputSheet(shName),
     )
+    _styleHeaderAndTotal(table, config.outputSheet)
+  }
+
+  // Apply the bold + #d9e0e8 banding to row 0 (column headers) and the last
+  // row (Grand Total). Walks every column in the pivot width so the band is
+  // continuous even for cells the engine left empty (which writePivotToSheet
+  // skipped). Re-applied on every recompute since _clearPivotOutputSheet wipes
+  // formats first.
+  function _styleHeaderAndTotal(table, outputSheet) {
+    if (!formats?.set || !table.length) return
+    const cols = table[0]?.length || 0
+    const lastRow = table.length - 1
+    for (let c = 0; c < cols; c++) {
+      formats.set(cellId(0, c), PIVOT_HEADER_FORMAT, outputSheet)
+      if (lastRow > 0) {
+        formats.set(cellId(lastRow, c), PIVOT_HEADER_FORMAT, outputSheet)
+      }
+    }
   }
 
   function recomputePivotsForSheet(srcSheet) {
