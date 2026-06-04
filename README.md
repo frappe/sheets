@@ -50,7 +50,7 @@ Requires Frappe Framework 15 or 16.
 
 ```bash
 cd $PATH_TO_YOUR_BENCH
-bench get-app https://github.com/frappe/spreadsheet --branch main
+bench get-app https://github.com/frappe/sheets --branch main
 bench --site $YOUR_SITE install-app spreadsheet
 ```
 
