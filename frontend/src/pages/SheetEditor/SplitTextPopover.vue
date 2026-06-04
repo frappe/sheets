@@ -32,7 +32,6 @@
 				size="sm"
 				placeholder="e.g. ::"
 				class="sn-sp-custom-input"
-				@input="onCustomInput"
 				@click.stop
 			/>
 		</div>
@@ -68,25 +67,44 @@ const customValue    = ref('')
 const customActive   = ref(false)
 const customInputRef = ref(null)
 
+// Suppress the customValue watcher during programmatic clears (e.g. when
+// the user picks a named separator like "Comma" we wipe the custom field
+// to reset its UI state — without this flag the watcher would fire with
+// v='' and emit('choose','auto') a beat after our own emit, overriding
+// the user's actual pick.
+let _suppressCustomWatch = false
+function _clearCustomSilently() {
+	_suppressCustomWatch = true
+	customValue.value = ''
+	queueMicrotask(() => { _suppressCustomWatch = false })
+}
+
 watch(() => props.open, (v) => {
-	if (!v) { customValue.value = ''; customActive.value = false }
+	if (!v) { _clearCustomSilently(); customActive.value = false }
 })
 
 function onChoose(value) {
 	customActive.value = false
-	customValue.value  = ''
+	_clearCustomSilently()
 	emit('choose', value)
 }
 
-function onCustomInput() {
-	if (!customValue.value) {
+// Watch the bound ref directly instead of @input on the FormControl —
+// frappe-ui's FormControl emits `input` slightly before its v-model
+// flush, so reading customValue.value inside an @input handler can see
+// the *previous* value and silently fall through to the 'auto' branch.
+// The watcher fires AFTER customValue is up to date, so the dot the user
+// just typed always reaches `_previewSplit` as the custom separator.
+watch(customValue, (v) => {
+	if (_suppressCustomWatch) return
+	if (!v) {
 		customActive.value = false
 		emit('choose', 'auto')
 		return
 	}
 	customActive.value = true
-	emit('choose', { kind: 'custom', value: customValue.value })
-}
+	emit('choose', { kind: 'custom', value: v })
+})
 
 const style = computed(() => {
 	if (!props.anchor) return { display: 'none' }
