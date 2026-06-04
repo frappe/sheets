@@ -2241,6 +2241,29 @@ function _setupGridInstance() {
       // so the next-row move-down on Enter lands on the home sheet too.
       const homeSheet = editingHomeSheet.value
       const writeSheet = (homeSheet && homeSheet !== sheet.getCurrentSheet()) ? homeSheet : sheet.getCurrentSheet()
+
+      // Enforce data validation rules. The engine stores rules in the snapshot
+      // and the canvas paints a dropdown arrow for `list` rules, but until
+      // now nothing surfaced number / text_length rejection — so "between 1
+      // and 10" silently accepted any value. Skip the check for empty values
+      // so the user can always clear a cell (matches Google Sheets).
+      const trimmed = String(value ?? '').trim()
+      if (trimmed !== '') {
+        const v = validation.validate(id, value, writeSheet)
+        if (!v.valid) {
+          const msg = v.message || 'Value rejected by data validation rule'
+          saveError.value = msg
+          setTimeout(() => { if (saveError.value === msg) saveError.value = '' }, 3500)
+          // Force a re-render so the canvas repaints with the pre-edit value
+          // (we never called sheet.setCell so the engine still has it).
+          grid?.render?.()
+          editingHomeSheet.value = null
+          editingHomeCell.value  = null
+          syncFlags()
+          return
+        }
+      }
+
       const before = sheet.getCell(id, writeSheet)
       sheet.setCell(id, value, writeSheet)
       if (writeSheet !== sheet.getCurrentSheet()) {
