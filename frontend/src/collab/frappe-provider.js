@@ -36,7 +36,17 @@ const EVT_STATE         = 'yjs_state'
  *                                        ignore our own broadcasts (defaults
  *                                        to a fresh random id per client)
  */
-export function createFrappeProvider({ doc, sheetId, realtime, selfTag } = {}) {
+export function createFrappeProvider({
+	doc, sheetId, realtime, selfTag,
+	// Coalescing knobs — see _flushLocalUpdates below. Wider window means
+	// fewer POSTs during bulk ops but a slightly later remote paint for
+	// normal typing. 16 ms ≈ one frame: invisible to a typist, kills the
+	// connection-exhaustion under split-text/paste/fill on 1000+ rows.
+	flushIntervalMs   = 16,
+	maxQueuedUpdates  = 256,
+	_setTimeout       = setTimeout,
+	_clearTimeout     = clearTimeout,
+} = {}) {
 	if (!doc || !sheetId || !realtime) {
 		throw new Error('createFrappeProvider: doc, sheetId and realtime are required')
 	}
@@ -44,16 +54,51 @@ export function createFrappeProvider({ doc, sheetId, realtime, selfTag } = {}) {
 	const tag = selfTag || `cli-${Math.random().toString(36).slice(2, 10)}`
 	let stopped = false
 
+	// Outbound coalescing. Frappe Cloud's www path publishes each Yjs update
+	// as a separate HTTP POST through `yjs_relay`, so a split-text on 1100
+	// rows × 5 columns produced ~5500 POSTs in a few seconds and Chrome
+	// returned ERR_INSUFFICIENT_RESOURCES (out of concurrent connection
+	// slots). Buffering local updates and flushing a single merged payload
+	// on a short debounce collapses bulk ops into one POST while keeping
+	// normal typing's wall-clock latency well under one frame.
+	let _pendingUpdates = []
+	let _flushTimer     = null
+
+	function _flushLocalUpdates() {
+		if (_flushTimer) {
+			_clearTimeout(_flushTimer)
+			_flushTimer = null
+		}
+		if (stopped || _pendingUpdates.length === 0) return
+		// One update is the common typing case — skip the merge cost and
+		// any micro-overhead it adds.
+		const merged = _pendingUpdates.length === 1
+			? _pendingUpdates[0]
+			: Y.mergeUpdates(_pendingUpdates)
+		_pendingUpdates = []
+		realtime.publish?.(EVT_UPDATE, {
+			sheet:  sheetId,
+			from:   tag,
+			update: _bytesToBase64(merged),
+		})
+	}
+
 	const _onLocalUpdate = (update, origin) => {
 		if (stopped) return
 		// Echoes of updates we just applied locally would re-enter the
 		// network, so guard against the REMOTE_ORIGIN tag.
 		if (origin === REMOTE_ORIGIN) return
-		realtime.publish?.(EVT_UPDATE, {
-			sheet:  sheetId,
-			from:   tag,
-			update: _bytesToBase64(update),
-		})
+		_pendingUpdates.push(update)
+		// Drain immediately when the queue is suspiciously large so a
+		// pathological loop (no event-loop yield, no microtask break) can't
+		// grow it without bound.
+		if (_pendingUpdates.length >= maxQueuedUpdates) {
+			_flushLocalUpdates()
+			return
+		}
+		if (!_flushTimer) {
+			_flushTimer = _setTimeout(_flushLocalUpdates, flushIntervalMs)
+		}
 	}
 
 	const _onRemoteUpdate = (payload) => {
@@ -68,6 +113,13 @@ export function createFrappeProvider({ doc, sheetId, realtime, selfTag } = {}) {
 		if (stopped) return
 		if (!payload || payload.sheet !== sheetId) return
 		if (payload.from === tag) return  // don't reply to ourselves
+		// Flush any pending local updates first — a peer just asked for
+		// state, and the state they'd compute is "ours through the last
+		// flushed publish". Sending unflushed updates as part of the state
+		// dump is fine (they're in the doc) but means the new peer also
+		// receives them again via the deferred publish — harmless but
+		// wasteful. Draining here keeps the wire clean.
+		_flushLocalUpdates()
 		const full = Y.encodeStateAsUpdate(doc)
 		realtime.publish?.(EVT_STATE, {
 			sheet:  sheetId,
@@ -97,14 +149,23 @@ export function createFrappeProvider({ doc, sheetId, realtime, selfTag } = {}) {
 	realtime.publish?.(EVT_STATE_REQUEST, { sheet: sheetId, from: tag })
 
 	function destroy() {
+		// Flush before the `stopped` guard kicks in — we want the last
+		// in-flight typing burst to actually land at peers when the user
+		// navigates away. After this, `stopped` short-circuits everything.
+		_flushLocalUpdates()
 		stopped = true
+		if (_flushTimer) { _clearTimeout(_flushTimer); _flushTimer = null }
 		doc.off('update', _onLocalUpdate)
 		realtime.off?.(EVT_UPDATE,        _onRemoteUpdate)
 		realtime.off?.(EVT_STATE_REQUEST, _onStateRequest)
 		realtime.off?.(EVT_STATE,         _onState)
 	}
 
-	return { destroy, tag }
+	// `flush` is exposed so callers that need a strict ordering guarantee
+	// before doing something else (e.g. fire-and-navigate) can force the
+	// debounce window to close synchronously. Most code paths shouldn't
+	// touch this.
+	return { destroy, tag, flush: _flushLocalUpdates }
 }
 
 // ── byte ↔ base64 (browser-safe, chunked to avoid stack overflows) ─────

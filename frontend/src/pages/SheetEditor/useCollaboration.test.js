@@ -213,10 +213,14 @@ describe('useCollaboration — local cell writes mirror to Y.Doc', () => {
 		expect(sheet._cells['Sheet1:A1']).toBe(99)
 	})
 
-	it('local setCell triggers a yjs_relay publish (provider sends update)', () => {
+	it('local setCell triggers a yjs_relay publish (provider sends update)', async () => {
 		const { sheet, callFn } = makeDeps()
 		const before = callFn.mock.calls.length
 		sheet.setCell('A1', 'hello', 'Sheet1')
+		// Outbound publishes are now debounced (~16ms) so bulk operations
+		// don't exhaust browser HTTP connection slots. Wait past the
+		// debounce window before asserting.
+		await new Promise(r => setTimeout(r, 50))
 		const after = callFn.mock.calls.slice(before)
 		const updates = after.filter(
 			([m, args]) => m === 'spreadsheet.api.yjs_relay' && args.event === 'yjs_update',
