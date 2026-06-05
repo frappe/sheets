@@ -4072,10 +4072,21 @@ function applyBorder(preset) {
 function toggleMerge() {
   if (!grid) return
   const { r0, c0, r1, c1 } = grid.getSelection()
-  if (r0 === r1 && c0 === c1) return
-  const masterId = colLabel(c0) + (r0 + 1)
-  if (merge.isMaster(masterId)) merge.unmerge(r0, c0, r1, c1)
-  else                          merge.merge(r0, c0, r1, c1)
+  // Resolve the anchor cell to its master — clicking inside the merged
+  // region (slave or master) should target the existing merge so the
+  // user can unmerge by single-clicking and hitting the toolbar button.
+  const anchor   = colLabel(c0) + (r0 + 1)
+  const masterId = merge.resolveId(anchor)
+  if (merge.isMaster(masterId)) {
+    // Always allow unmerge, even on a 1×1 selection. Use the master's
+    // actual span rather than the user's selection — the selection is
+    // often just the master cell coords and would miss the slaves.
+    const info = merge.getMasterInfo(masterId)
+    merge.unmerge(info.r, info.c, info.r + info.rowSpan - 1, info.c + info.colSpan - 1)
+  } else {
+    if (r0 === r1 && c0 === c1) return   // nothing to merge in a single cell
+    merge.merge(r0, c0, r1, c1)
+  }
   markEdited()
   grid.render()
 }
