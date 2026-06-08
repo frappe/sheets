@@ -2955,8 +2955,11 @@ function onFormulaKey(e) {
 // the user wandered off to another sheet to pick a range. If there's no
 // cross-sheet edit, this collapses to the legacy "write to activeCell" path.
 function _commitFormulaBar() {
-  const homeSheet = editingHomeSheet.value
-  const homeCell  = editingHomeCell.value
+  const homeSheet   = editingHomeSheet.value
+  const homeCell    = editingHomeCell.value
+  const targetSheet = homeSheet || sheet.getCurrentSheet()
+  const targetId    = homeCell  || activeCell.value
+  const before      = { [targetId]: sheet.getCell(targetId, targetSheet) }
   if (homeSheet && homeSheet !== sheet.getCurrentSheet()) {
     switchSheet(homeSheet, { preserveEdit: true })
     sheet.setCell(homeCell, formulaValue.value, homeSheet)
@@ -2965,7 +2968,7 @@ function _commitFormulaBar() {
   }
   editingHomeSheet.value = null
   editingHomeCell.value  = null
-  markEdited()
+  _pushEditOp(targetSheet, before, 'Edit cell')
 }
 
 function _cancelFormulaBar() {
@@ -2991,6 +2994,14 @@ function fillDown() {
   if (!grid) return
   const { r0, c0, r1, c1 } = grid.getSelection()
   if (r1 <= r0) return
+  const sn = sheet.getCurrentSheet()
+  const before = {}
+  for (let c = c0; c <= c1; c++) {
+    for (let r = r0 + 1; r <= r1; r++) {
+      const id = colLabel(c) + (r + 1)
+      before[id] = sheet.getCell(id, sn)
+    }
+  }
   for (let c = c0; c <= c1; c++) {
     const srcVal = sheet.getCell(colLabel(c) + (r0 + 1))
     for (let r = r0 + 1; r <= r1; r++) {
@@ -2999,13 +3010,21 @@ function fillDown() {
       sheet.setCell(colLabel(c) + (r + 1), val)
     }
   }
-  markEdited()
+  _pushEditOp(sn, before, 'Fill down')
 }
 
 function fillRight() {
   if (!grid) return
   const { r0, c0, r1, c1 } = grid.getSelection()
   if (c1 <= c0) return
+  const sn = sheet.getCurrentSheet()
+  const before = {}
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0 + 1; c <= c1; c++) {
+      const id = colLabel(c) + (r + 1)
+      before[id] = sheet.getCell(id, sn)
+    }
+  }
   for (let r = r0; r <= r1; r++) {
     const srcVal = sheet.getCell(colLabel(c0) + (r + 1))
     for (let c = c0 + 1; c <= c1; c++) {
@@ -3014,7 +3033,7 @@ function fillRight() {
       sheet.setCell(colLabel(c) + (r + 1), val)
     }
   }
-  markEdited()
+  _pushEditOp(sn, before, 'Fill right')
 }
 
 // Mirrors `clipboard.hasData()` reactively so the context menu can show /
@@ -3052,10 +3071,13 @@ function onDocCopy(e) {
 function onDocCut(e) {
   if (!_canvasActive()) return
   e.preventDefault()
-  const src = grid.getSelection()
-  clipboard.cut(src); markEdited()
+  const src    = grid.getSelection()
+  const sn     = sheet.getCurrentSheet()
+  const before = _captureRange(src, sn)
+  clipboard.cut(src)
   clipboardHas.value = true
   grid.setMarchingAnts(src)
+  _pushEditOp(sn, before, 'Cut')
 }
 function onDocPaste(e) {
   if (!_canvasActive()) return
@@ -3432,9 +3454,12 @@ function openDropdown(id, rule, pos = {}) {
 }
 
 function pickDropdownOption(opt) {
-  sheet.setCell(dropdownPanel.id, opt)
+  const id     = dropdownPanel.id
+  const sn     = sheet.getCurrentSheet()
+  const before = { [id]: sheet.getCell(id, sn) }
+  sheet.setCell(id, opt)
   dropdownPanel.open = false
-  markEdited()
+  _pushEditOp(sn, before, 'Edit cell')
 }
 
 // ── Conditional formatting ────────────────────────────────────────────────────
@@ -4276,6 +4301,40 @@ function diffCells(cells, getCell) {
 // Called after every user mutation that should be undoable and trigger auto-save.
 function markEdited() {
   history.push()
+  syncFlags()
+  isDirty.value = true
+}
+
+// Diff-and-record helper for cell-edit paths. Mirrors what onCommit /
+// onBatchCommit do for typing-into-a-cell: capture a `beforeMap` BEFORE
+// the writes, run the writes, then call this with the same map to push
+// a single 'edit' op carrying only the cells that actually changed.
+// Reasons we route through this instead of markEdited():
+//   1) Snapshot pushes can't be undone when the previous history entry
+//      is an op (no earlier snap to restore from) — see the fill bug.
+//   2) Op-based history is ~75 000× cheaper than a full snapshot for
+//      large sheets, and these helpers fire on every Ctrl+D / Enter /
+//      cut / dropdown pick.
+//   3) The collab broadcast piggybacks on the same diff, so other
+//      clients see the change instantly without a re-sync round trip.
+function _pushEditOp(sheetName, beforeMap, summary = '') {
+  if (!beforeMap) return
+  const sn   = sheetName || sheet.getCurrentSheet()
+  const refs = []
+  const before = {}, after = {}
+  for (const id of Object.keys(beforeMap)) {
+    const a = sheet.getCell(id, sn)
+    if (a !== beforeMap[id]) {
+      before[id] = beforeMap[id]
+      after[id]  = a
+      refs.push(id)
+    }
+  }
+  if (!refs.length) return
+  const op = { opType: 'edit', subSheet: sn, cellRefs: refs, before, after, summary }
+  _queueOp(op)
+  history.pushOp(op)
+  broadcastBatchChange(sn, refs.map(id => ({ id, value: after[id] })))
   syncFlags()
   isDirty.value = true
 }
