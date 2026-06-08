@@ -176,7 +176,9 @@
           <Button :variant="open ? 'subtle' : 'ghost'" size="sm" iconRight="chevron-down" :label="activeFontFamilyLabel" tooltip="Font family" />
         </template>
       </Dropdown>
-      <TextInput type="number" size="sm" class="sn-font-size-input" :model-value="activeFormat.fontSize || 13" min="8" max="72" @change="onFontSizeInput" @keydown.enter.prevent="onFontSizeInput" />
+      <Tooltip text="Font size">
+        <TextInput type="number" size="sm" class="sn-font-size-input" :model-value="activeFormat.fontSize || 13" min="8" max="72" @change="onFontSizeInput" @keydown.enter.prevent="onFontSizeInput" />
+      </Tooltip>
 
       <div class="sn-vr" />
 
@@ -196,16 +198,20 @@
           <Button :variant="open ? 'subtle' : 'ghost'" size="sm" :icon="hAlignIcon" tooltip="Alignment" />
         </template>
       </Dropdown>
-      <label class="sn-swatch-btn" title="Text colour">
-        <FeatherIcon name="type" class="sn-swatch-glyph" />
-        <span class="sn-swatch-underline" :style="{ background: activeFormat.color || '#171717' }"></span>
-        <input name="text-color" type="color" :value="activeFormat.color || '#171717'" @input="setColor('color', $event.target.value)" />
-      </label>
-      <label class="sn-swatch-btn" title="Fill colour">
-        <FeatherIcon name="droplet" class="sn-swatch-glyph" />
-        <span class="sn-swatch-underline sn-swatch-fill" :style="{ background: activeFormat.backgroundColor || '#ffffff' }"></span>
-        <input name="fill-color" type="color" :value="activeFormat.backgroundColor || '#ffffff'" @input="setColor('backgroundColor', $event.target.value)" />
-      </label>
+      <Tooltip text="Text colour">
+        <label class="sn-swatch-btn">
+          <FeatherIcon name="type" class="sn-swatch-glyph" />
+          <span class="sn-swatch-underline" :style="{ background: activeFormat.color || '#171717' }"></span>
+          <input name="text-color" type="color" title="" :value="activeFormat.color || '#171717'" @input="setColor('color', $event.target.value)" />
+        </label>
+      </Tooltip>
+      <Tooltip text="Fill colour">
+        <label class="sn-swatch-btn">
+          <FeatherIcon name="droplet" class="sn-swatch-glyph" />
+          <span class="sn-swatch-underline sn-swatch-fill" :style="{ background: activeFormat.backgroundColor || '#ffffff' }"></span>
+          <input name="fill-color" type="color" title="" :value="activeFormat.backgroundColor || '#ffffff'" @input="setColor('backgroundColor', $event.target.value)" />
+        </label>
+      </Tooltip>
 
       <div class="sn-vr" />
 
@@ -1083,7 +1089,7 @@ import { getFunctionNames }    from '../../engine/formula.js'
 import NamedRangesDialog       from './NamedRangesDialog.vue'
 import { useSmartFill }        from './useSmartFill.js'
 import * as versionsApi        from '../../services/versions.js'
-import { Checkbox, KeyboardShortcut, TextInput } from 'frappe-ui'
+import { Checkbox, KeyboardShortcut, TextInput, Tooltip } from 'frappe-ui'
 
 const props = defineProps({ id: { type: String, default: 'new' } })
 const emit  = defineEmits(['close', 'saved'])
