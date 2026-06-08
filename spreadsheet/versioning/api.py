@@ -25,10 +25,31 @@ from . import state as state_mod
 from . import timeline as timeline_mod
 
 
+# Hard upper bounds on user-supplied `limit` parameters. The underlying
+# modules already gate on read permission, but an authenticated caller
+# could otherwise pass `limit=99_999_999` and force the DB to walk huge
+# slices of the op-log / snapshot table — cheap DoS we have no reason
+# to leave open. Defaults (`bucket_limit=20`, page `limit=20`, etc.)
+# stay where they are; these caps only kick in when the caller passes
+# an absurd value.
+_MAX_BUCKET_LIMIT = 200
+_MAX_PAGE_LIMIT   = 500
+_MAX_OPS_LIMIT    = 1000
+
+
+def _clamp(value: int, hi: int) -> int:
+	v = int(value)
+	if v < 1:
+		return 1
+	return v if v <= hi else hi
+
+
 @frappe.whitelist()
 def timeline(sheet: str, tz_offset_minutes: int = 0, bucket_limit: int = 20) -> dict:
 	return timeline_mod.list_buckets(
-		sheet, tz_offset_minutes=int(tz_offset_minutes), bucket_limit=int(bucket_limit)
+		sheet,
+		tz_offset_minutes=int(tz_offset_minutes),
+		bucket_limit=_clamp(bucket_limit, _MAX_BUCKET_LIMIT),
 	)
 
 
@@ -44,7 +65,7 @@ def timeline_page(
 		sheet,
 		bucket,
 		cursor=cursor or None,
-		limit=int(limit),
+		limit=_clamp(limit, _MAX_PAGE_LIMIT),
 		tz_offset_minutes=int(tz_offset_minutes),
 	)
 
@@ -89,7 +110,9 @@ def delete_snapshot(snapshot: str) -> dict:
 
 @frappe.whitelist()
 def ops_between(sheet: str, from_seq: int, to_seq: int, limit: int = 200) -> list[dict]:
-	return ops_mod.between(sheet, int(from_seq), int(to_seq), limit=int(limit))
+	return ops_mod.between(
+		sheet, int(from_seq), int(to_seq), limit=_clamp(limit, _MAX_OPS_LIMIT)
+	)
 
 
 @frappe.whitelist()
@@ -97,7 +120,7 @@ def ops_for_cell(
 	sheet: str, cell_id: str, sub_sheet: str = "", limit: int = 50
 ) -> list[dict]:
 	return ops_mod.for_cell(
-		sheet, cell_id, sub_sheet=sub_sheet or None, limit=int(limit)
+		sheet, cell_id, sub_sheet=sub_sheet or None, limit=_clamp(limit, _MAX_OPS_LIMIT)
 	)
 
 
