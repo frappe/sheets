@@ -1,4 +1,48 @@
+import json
+import os
+
 import frappe
+
+
+# Bundle URL resolution ─────────────────────────────────────────────────────
+#
+# Vite emits content-hashed filenames (e.g. `index.abc123.js`) plus a manifest
+# at `<outDir>/.vite/manifest.json` mapping logical sources to their hashed
+# outputs. The Jinja template needs the current hashed URLs at render time;
+# we read the manifest once per worker process (it doesn't change without an
+# app restart) and fall back to legacy unhashed paths if it's missing — that
+# keeps things working in dev where vite serves the SPA itself and there's no
+# build output here at all.
+
+_ASSET_BASE = "/assets/spreadsheet/spreadsheet/"
+_ASSET_CACHE = None
+
+
+def _read_asset_manifest() -> dict:
+    global _ASSET_CACHE
+    if _ASSET_CACHE is not None:
+        return _ASSET_CACHE
+    path = os.path.join(
+        frappe.get_app_path("spreadsheet"),
+        "public", "spreadsheet", ".vite", "manifest.json",
+    )
+    try:
+        with open(path) as fh:
+            _ASSET_CACHE = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        _ASSET_CACHE = {}
+    return _ASSET_CACHE
+
+
+def _asset_paths() -> dict:
+    manifest = _read_asset_manifest()
+    entry = manifest.get("index.html") or {}
+    js  = entry.get("file") or "index.js"
+    css = entry.get("css")  or ["index.css"]
+    return {
+        "js":  _ASSET_BASE + js,
+        "css": [_ASSET_BASE + c for c in css],
+    }
 
 
 def get_context(context):
@@ -36,3 +80,6 @@ def get_context(context):
     # the avatar pile stays empty even with concurrent users on the sheet.
     context.sitename       = frappe.local.site
     context.socketio_port  = frappe.conf.get("socketio_port") or 9000
+
+    # Vite-emitted hashed bundle URLs — see _asset_paths above.
+    context.assets = _asset_paths()

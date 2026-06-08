@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Frappe Spreadsheet</title>
   <link rel="icon" type="image/svg+xml" href="/assets/spreadsheet/spreadsheet-favicon.svg" />
-  <link rel="stylesheet" href="/assets/spreadsheet/spreadsheet/index.css" />
+  {%- for href in assets.css %}
+  <link rel="stylesheet" href="{{ href }}" />
+  {%- endfor %}
 </head>
 <body>
   <script>
@@ -35,6 +37,6 @@
     };
   </script>
   <div id="root"></div>
-  <script type="module" src="/assets/spreadsheet/spreadsheet/index.js"></script>
+  <script type="module" src="{{ assets.js }}"></script>
 </body>
 </html>

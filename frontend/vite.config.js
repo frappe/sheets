@@ -22,11 +22,23 @@ export default defineConfig({
   build: {
     outDir: '../spreadsheet/public/spreadsheet',
     emptyOutDir: true,
+    // Vite emits .vite/manifest.json mapping logical sources (e.g.
+    // `index.html`) to their content-hashed output filenames. The
+    // Jinja template at spreadsheet/www/spreadsheet.html doesn't load
+    // Vite's generated index.html directly — it's a Frappe-rendered
+    // page — so spreadsheet/www/spreadsheet.py reads this manifest at
+    // request time to inject the current bundle URLs. Without the
+    // manifest the page would have no way to discover hashed names.
+    manifest: true,
     rollupOptions: {
       output: {
-        entryFileNames: 'index.js',
-        chunkFileNames: '[name].js',
-        assetFileNames: '[name].[ext]',
+        // Content hashes are the only reliable cache-bust for the
+        // long-lived browser / CDN caches in front of this SPA.
+        // Dynamic imports keep working because Rollup rewrites the
+        // chunk URLs in the emitted JS at build time.
+        entryFileNames: 'index.[hash].js',
+        chunkFileNames: '[name].[hash].js',
+        assetFileNames: '[name].[hash].[ext]',
       },
     },
   },
