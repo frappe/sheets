@@ -222,8 +222,19 @@ watch(show, (open) => {
 // ── Range detection ────────────────────────────────────────────────────────-
 
 function detect() {
-  const range = rangeInput.value.trim()
-  if (!range) { rangeError.value = 'Enter a range first.'; matrix.value = []; columns.value = []; return }
+  let range = rangeInput.value.trim()
+  // Empty range → try to auto-find the data block on the source sheet so
+  // the user gets useful behaviour out of the Detect button instead of just
+  // "type a range first".
+  if (!range) {
+    range = _autoDetectRange()
+    if (!range) {
+      rangeError.value = 'No data found on this sheet. Type a range like A1:D20.'
+      matrix.value = []; columns.value = []
+      return
+    }
+    rangeInput.value = range
+  }
   const [start, end] = range.includes(':') ? range.split(':') : [range, range]
   const data = props.sheet.getRangeValues(start, end, props.currentSheet)
   if (!data || !data.length) { rangeError.value = 'Could not read range.'; matrix.value = []; columns.value = []; return }
@@ -376,6 +387,28 @@ function _colLetter(idx) {
   let n = idx + 1, s = ''
   while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26) }
   return s
+}
+
+// Scan A1..AZ500 on the current sheet for the bounding box of non-empty
+// cells, return it as "A1:<col><row>". Uses the raw `getCell` (not the
+// formula-evaluating `getRangeValues`) so a literal 0 reads as data and an
+// empty cell reads as empty. 500×52 ≈ 26k lookups — a fraction of a ms.
+function _autoDetectRange() {
+  if (!props.sheet?.getCell) return ''
+  const sheetName = props.currentSheet
+  const ROWS = 500, COLS = 52
+  let maxRow = -1, maxCol = -1
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const v = props.sheet.getCell(_colLetter(c) + (r + 1), sheetName)
+      if (v !== '' && v !== undefined && v !== null) {
+        if (r > maxRow) maxRow = r
+        if (c > maxCol) maxCol = c
+      }
+    }
+  }
+  if (maxRow < 0) return ''
+  return `A1:${_colLetter(maxCol)}${maxRow + 1}`
 }
 </script>
 
