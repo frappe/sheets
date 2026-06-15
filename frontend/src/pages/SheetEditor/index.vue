@@ -576,10 +576,10 @@
           @dragover.prevent="onTabDragOver($event, name)"
           @drop.prevent="onTabDrop($event, name)"
         >
-          <!-- One visual unit: label + (active-only) chevron share a single
-               pill background so they read as one button. The chevron only
-               renders on the active tab; right-click on any inactive tab
-               opens the same menu. -->
+          <!-- One visual unit: label + chevron share a single pill background
+               so they read as one button. Chevron renders on every tab so
+               the menu affordance is always visible; clicking it opens the
+               tab menu, clicking the label switches sheets. -->
           <Button
             variant="ghost"
             size="sm"
@@ -592,7 +592,6 @@
             @contextmenu.prevent="openTabMenu($event, name)"
           />
           <Button
-            v-if="name === currentSheet"
             variant="ghost"
             size="sm"
             icon="chevron-down"
@@ -4779,12 +4778,14 @@ function toggleShowFormulas() {
 .sn-tab-btn { max-width:148px; }
 .sn-tab-btn :deep(button) {
   font-size:12px; font-weight:400; color:var(--ink-gray-7);
-  padding:0 8px; height:28px;
+  /* Tight right padding so the label flows directly into the chevron and
+     the pair reads as one pill on every tab. */
+  padding:0 2px 0 8px; height:28px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   max-width:148px; border-radius:0;
   background:transparent !important;
 }
-.sn-tab--active .sn-tab-btn :deep(button) { font-weight:600; color:var(--ink-gray-9); padding-right:2px; }
+.sn-tab--active .sn-tab-btn :deep(button) { font-weight:600; color:var(--ink-gray-9); }
 
 /* Pivot icon tint */
 .sn-tab--pivot .sn-tab-btn :deep(.icon) { color:var(--ink-cyan-7, #0e7490); }
@@ -4808,16 +4809,18 @@ function toggleShowFormulas() {
   margin-left:2px; line-height:1;
 }
 
-/* Chevron — active-tab only, sits flush against the label inside the
-   same pill so the two read as one button. */
+/* Chevron — sits flush against the label inside the same pill so the two
+   read as one button. Slightly muted on inactive tabs, full ink on the
+   active one (matches the label's color shift). */
 .sn-tab-chevron :deep(button) {
-  padding:0 6px 0 2px;
+  padding:0 6px 0 0;
   height:28px;
   border-radius:0;
   background:transparent !important;
-  color:var(--ink-gray-6);
+  color:var(--ink-gray-5);
 }
 .sn-tab-chevron :deep(button:hover) { color:var(--ink-gray-9); }
+.sn-tab--active .sn-tab-chevron :deep(button) { color:var(--ink-gray-8); }
 
 /* Add-sheet button — pin its inner Button to the same 28px height as the
    tab labels and center within the track so the `+` sits on the same row
