@@ -21,18 +21,18 @@ export default defineConfig({
     }),
   ],
 
-  base: '/assets/spreadsheet/spreadsheet/',
+  base: '/assets/sheets/sheets/',
 
   build: {
-    outDir: '../spreadsheet/public/spreadsheet',
+    outDir: '../sheets/public/sheets',
     emptyOutDir: true,
     // Vite emits .vite/manifest.json mapping logical sources (e.g.
     // `index.html`) to their content-hashed output filenames. The
-    // Jinja template at spreadsheet/www/spreadsheet.html doesn't load
-    // Vite's generated index.html directly — it's a Frappe-rendered
-    // page — so spreadsheet/www/spreadsheet.py reads this manifest at
-    // request time to inject the current bundle URLs. Without the
-    // manifest the page would have no way to discover hashed names.
+    // Jinja template at sheets/www/sheets.html doesn't load Vite's
+    // generated index.html directly — it's a Frappe-rendered page —
+    // so sheets/www/sheets.py reads this manifest at request time to
+    // inject the current bundle URLs. Without the manifest the page
+    // would have no way to discover hashed names.
     manifest: true,
     rollupOptions: {
       output: {

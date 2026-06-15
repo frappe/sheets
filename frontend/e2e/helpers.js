@@ -3,7 +3,7 @@ import { expect } from '@playwright/test'
 export const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
 
 export async function openNewSheet(page) {
-  await page.goto('/spreadsheet')
+  await page.goto('/sheets')
   await expect(page.locator('#root')).toBeVisible()
 
   // Home.vue renders "New Spreadsheet" in two places — the empty-state

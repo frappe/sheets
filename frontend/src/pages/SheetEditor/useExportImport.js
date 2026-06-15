@@ -102,7 +102,7 @@ export function useExportImport({
     const blob = new Blob([csv], { type: 'text/csv' })
     const a = Object.assign(document.createElement('a'), {
       href: URL.createObjectURL(blob),
-      download: `${getCurrentTitle() || 'spreadsheet'}.csv`,
+      download: `${getCurrentTitle() || 'sheet'}.csv`,
     })
     a.click()
   }
@@ -115,7 +115,7 @@ export function useExportImport({
       const ws = utils.aoa_to_sheet(_sheetToAoa(sn, sheet))
       utils.book_append_sheet(wb, ws, sn)
     }
-    writeFile(wb, `${getCurrentTitle() || 'spreadsheet'}.xlsx`)
+    writeFile(wb, `${getCurrentTitle() || 'sheet'}.xlsx`)
   }
 
   function exportPDF() {

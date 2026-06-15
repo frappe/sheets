@@ -16,7 +16,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
   async function loadSheet(name) {
     loadError.value = null
     try {
-      const doc    = await call('spreadsheet.api.get_sheet', { name })
+      const doc    = await call('sheets.api.get_sheet', { name })
       const saved  = JSON.parse(doc.sheets_data || '{}')
       if (saved.formats)    formats.restore(saved.formats)
       sheet.restore(saved.sheet ?? { sheets: { Sheet1: {} }, current: 'Sheet1' })
@@ -37,7 +37,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
         t === 'PermissionError'    ? 'denied'  :
         t === 'DoesNotExistError'  ? 'missing' :
                                      'other'
-      loadError.value = { kind, message: err?.message || 'Could not open this spreadsheet' }
+      loadError.value = { kind, message: err?.message || 'Could not open this sheet' }
     }
   }
 
@@ -45,7 +45,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
   // doc name.  Called immediately on mount so every doc has a real ID from the
   // start — no manual-save step, matching Google Sheets' always-saved model.
   async function autoCreate(title, { ops } = {}) {
-    return _persist(null, title || 'Untitled Spreadsheet', { ops })
+    return _persist(null, title || 'Untitled Sheet', { ops })
   }
 
   async function saveExisting(name, title, { keepalive = false, ops } = {}) {
@@ -127,7 +127,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
           await new Promise(r => setTimeout(r, backoffMs[attempt]))
         }
         try {
-          const result = await call('spreadsheet.api.save_sheet', args, { keepalive })
+          const result = await call('sheets.api.save_sheet', args, { keepalive })
           currentTitle.value = title
           // First success clears any sticky error from a previous failure.
           saveError.value = ''

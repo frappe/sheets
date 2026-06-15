@@ -15,7 +15,7 @@ import { resolve, dirname, join }  from 'node:path'
 import { fileURLToPath }            from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DIST = resolve(__dirname, '../../spreadsheet/public/spreadsheet')
+const DIST = resolve(__dirname, '../../sheets/public/sheets')
 
 // Budgets in KB (1024 bytes). `raw` = on-disk minified size; `gzip` = wire
 // size when served with gzip compression — both matter (parse cost vs.
@@ -23,7 +23,7 @@ const DIST = resolve(__dirname, '../../spreadsheet/public/spreadsheet')
 const BUDGETS = [
   // index.js grew ~140 KB raw (~40 KB gzipped) when we vendored
   // socket.io-client to stand up `frappe.realtime` ourselves on the public
-  // www/spreadsheet page (Desk's socketio_client.js isn't loaded there).
+  // www/sheets page (Desk's socketio_client.js isn't loaded there).
   // That unblocks multi-user presence on Frappe Cloud today. When the
   // Hocuspocus path replaces the legacy relay entirely, the dep + ~140 KB
   // go with it and this budget can come back down to ~800.

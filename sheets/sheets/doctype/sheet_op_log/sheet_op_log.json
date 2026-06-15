@@ -1,0 +1,100 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-05-20 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sheet",
+  "seq",
+  "sub_sheet",
+  "op_type",
+  "cell_refs",
+  "before_json",
+  "after_json",
+  "summary",
+  "actor"
+ ],
+ "fields": [
+  {
+   "fieldname": "sheet",
+   "fieldtype": "Link",
+   "label": "Sheet",
+   "options": "Sheet",
+   "reqd": 1,
+   "in_standard_filter": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "seq",
+   "fieldtype": "Long Int",
+   "label": "Op-log sequence",
+   "description": "Monotonic per-sheet sequence number.",
+   "search_index": 1
+  },
+  {
+   "fieldname": "sub_sheet",
+   "fieldtype": "Data",
+   "label": "Sub-sheet name"
+  },
+  {
+   "fieldname": "op_type",
+   "fieldtype": "Data",
+   "label": "Op type",
+   "reqd": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "cell_refs",
+   "fieldtype": "Long Text",
+   "label": "Cell refs (JSON array)"
+  },
+  {
+   "fieldname": "before_json",
+   "fieldtype": "Long Text",
+   "label": "Before values (JSON map id→value)"
+  },
+  {
+   "fieldname": "after_json",
+   "fieldtype": "Long Text",
+   "label": "After values (JSON map id→value)"
+  },
+  {
+   "fieldname": "summary",
+   "fieldtype": "Data",
+   "label": "Summary"
+  },
+  {
+   "fieldname": "actor",
+   "fieldtype": "Link",
+   "label": "Actor",
+   "options": "User"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-05-20 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Sheets",
+ "name": "Sheet Op Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "All"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

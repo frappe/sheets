@@ -15,7 +15,7 @@ export function setTotalCols(n) { TOTAL_COLS = Math.max(1, Math.floor(n)) }
 // so these are baked in. Keep in sync with --ink-/--outline-/--surface-.
 //
 // Selection accent is intentionally monochrome (Espresso black + neutral grays)
-// rather than blue, to match Frappe Spreadsheet's black-and-grey theme.
+// rather than blue, to match Frappe Sheets's black-and-grey theme.
 export const COLORS = {
   white:        '#FFFFFF',                  // --surface-white
   gridLine:     '#E2E2E2',                  // --outline-gray-2

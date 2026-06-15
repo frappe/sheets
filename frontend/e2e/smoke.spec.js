@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('smoke', () => {
-  test('app loads at /spreadsheet and mounts #root', async ({ page }) => {
+  test('app loads at /sheets and mounts #root', async ({ page }) => {
     const consoleErrors = []
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text())
     })
 
-    await page.goto('/spreadsheet')
+    await page.goto('/sheets')
 
     await expect(page.locator('#root')).toBeVisible()
 

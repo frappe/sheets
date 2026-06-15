@@ -30,8 +30,8 @@ if (FormControl?.props?.variant) {
 const app = createApp(App)
 
 // Optional Sentry — only activates when the deploying site set
-// `spreadsheet_sentry_dsn` in site_config.json (injected via the boot
-// shim in spreadsheet.html). No-op locally.
+// `sheets_sentry_dsn` in site_config.json (injected via the boot
+// shim in sheets.html). No-op locally.
 initSentry(app)
 
 app.component('Button', Button)

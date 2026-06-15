@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-05-14 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "title",
+  "sheets_data",
+  "head_seq",
+  "head_snapshot"
+ ],
+ "fields": [
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sheets_data",
+   "fieldtype": "JSON",
+   "label": "Sheets Data"
+  },
+  {
+   "fieldname": "head_seq",
+   "fieldtype": "Long Int",
+   "label": "Head op-log seq",
+   "default": "0",
+   "description": "Highest op-log seq applied to the live sheets_data blob."
+  },
+  {
+   "fieldname": "head_snapshot",
+   "fieldtype": "Link",
+   "options": "Sheet Snapshot",
+   "label": "Latest snapshot"
+  }
+ ],
+ "links": [],
+ "modified": "2026-05-19 14:39:41.599820",
+ "modified_by": "asif@frappe.io",
+ "module": "Sheets",
+ "name": "Sheet",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "if_owner": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

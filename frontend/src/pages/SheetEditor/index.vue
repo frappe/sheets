@@ -16,9 +16,9 @@
         </svg>
       </div>
       <h2 class="sn-load-error-title">
-        <template v-if="loadError.kind === 'denied'">You don't have access to this spreadsheet</template>
-        <template v-else-if="loadError.kind === 'missing'">This spreadsheet doesn't exist</template>
-        <template v-else>Couldn't open this spreadsheet</template>
+        <template v-if="loadError.kind === 'denied'">You don't have access to this sheet</template>
+        <template v-else-if="loadError.kind === 'missing'">this sheet doesn't exist</template>
+        <template v-else>Couldn't open this sheet</template>
       </h2>
       <p class="sn-load-error-sub">
         <template v-if="loadError.kind === 'denied'">Ask the owner to share it with you, then reload.</template>
@@ -56,7 +56,7 @@
           class="sn-title-input"
           v-model="currentTitle"
           :style="{ width: titleInputWidth }"
-          placeholder="Untitled Spreadsheet"
+          placeholder="Untitled Sheet"
           spellcheck="false"
           @focus="onTitleFocus"
           @blur="onTitleBlur"
@@ -133,7 +133,7 @@
           size="sm"
           icon="share-2"
           :label="shareCount > 0 ? `Share · ${shareCount}` : 'Share'"
-          tooltip="Share this spreadsheet"
+          tooltip="Share this sheet"
           @click="shareOpen = true"
         />
         <span class="sn-topbar-divider" aria-hidden="true" />
@@ -1351,7 +1351,7 @@ const activeCell        = ref('A1')
 const formulaValue      = ref('')
 const canUndo           = ref(false)
 const canRedo           = ref(false)
-const currentTitle      = ref('Untitled Spreadsheet')
+const currentTitle      = ref('Untitled Sheet')
 const activeNumberFormat = ref('')
 
 // Cross-sheet picker: when the user starts a `=…` edit in the top formula
@@ -1617,13 +1617,13 @@ function _measureTitle(text) {
   return _titleMeasureCtx.measureText(text).width
 }
 const titleInputWidth = computed(() => {
-  const text = currentTitle.value || 'Untitled Spreadsheet'
+  const text = currentTitle.value || 'Untitled Sheet'
   // +22 = 20px horizontal padding + 2px caret/safety
   return Math.max(56, Math.min(520, _measureTitle(text) + 22)) + 'px'
 })
 
 
-// window.frappe is now seeded by spreadsheet.html (see www/spreadsheet.py).
+// window.frappe is now seeded by sheets.html (see www/sheets.py).
 // Read it lazily into refs and refresh on mount so the avatar reflects
 // the actual logged-in user instead of the "U" fallback if Frappe's
 // own boot script later re-populates the global.
@@ -2764,7 +2764,7 @@ async function _loadInitialData() {
   } else if (props.id === 'new') {
     // Google-Sheets model: create the doc immediately so there is never an
     // "unsaved" state.  The parent swaps the URL to ?id=<name> via onSaved.
-    const name = await autoCreate(currentTitle.value || 'Untitled Spreadsheet')
+    const name = await autoCreate(currentTitle.value || 'Untitled Sheet')
     if (name) emit('saved', name)
   }
 }

@@ -1,9 +1,9 @@
 [project]
-name = "spreadsheet"
+name = "sheets"
 authors = [
     { name = "Asif", email = "asif@frappe.io"}
 ]
-description = "Spreadsheet app for Frappe"
+description = "Sheets app for Frappe"
 requires-python = ">=3.11"
 readme = "README.md"
 dynamic = ["version"]

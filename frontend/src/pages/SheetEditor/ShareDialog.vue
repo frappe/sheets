@@ -176,7 +176,7 @@ const show = computed({
   set: (v) => emit('update:modelValue', v),
 })
 
-const dialogTitle = computed(() => `Sharing "${props.sheetTitle || 'Untitled Spreadsheet'}"`)
+const dialogTitle = computed(() => `Sharing "${props.sheetTitle || 'Untitled Sheet'}"`)
 
 watch(show, (open) => {
   if (open) {
@@ -235,11 +235,11 @@ async function applyGeneralAccess(type) {
   if (!props.sheetId) return
   try {
     if (type === 'all') {
-      await call('spreadsheet.api.share_sheet', {
+      await call('sheets.api.share_sheet', {
         name: props.sheetId, everyone: 1, write: generalRole.value === '1' ? 1 : 0,
       })
     } else {
-      await call('spreadsheet.api.unshare_sheet', { name: props.sheetId, everyone: 1 })
+      await call('sheets.api.unshare_sheet', { name: props.sheetId, everyone: 1 })
     }
   } catch (err) {
     generalAccess.value = prevAccess   // revert visual state
@@ -256,7 +256,7 @@ async function fetchShares() {
   if (!props.sheetId) return
   loading.value = true
   try {
-    const rows = await call('spreadsheet.api.get_sheet_shares', { name: props.sheetId })
+    const rows = await call('sheets.api.get_sheet_shares', { name: props.sheetId })
     // The "everyone" row encodes general access; keep it out of the member
     // list and use it to seed the General Access dropdown so the dialog
     // reflects persisted state on re-open.
@@ -288,7 +288,7 @@ function memberRoleOpts(s) {
 async function changeRole(s, write) {
   const prev = s.write; s.write = write
   try {
-    await call('spreadsheet.api.share_sheet', {
+    await call('sheets.api.share_sheet', {
       name: props.sheetId, user: s.user, write: write ? 1 : 0,
     })
   } catch (err) {
@@ -301,7 +301,7 @@ async function removeShare(s) {
   shares.value = shares.value.filter(r => r.user !== s.user)
   emit('shares-changed', shares.value.length)
   try {
-    await call('spreadsheet.api.unshare_sheet', { name: props.sheetId, user: s.user })
+    await call('sheets.api.unshare_sheet', { name: props.sheetId, user: s.user })
   } catch (err) {
     _flashError(err)
     await fetchShares()
@@ -396,7 +396,7 @@ async function inviteStaged() {
     // hard-to-read aggregate rejection.
     for (const c of staged.value) {
       try {
-        await call('spreadsheet.api.share_sheet', { name: props.sheetId, user: c.user, write })
+        await call('sheets.api.share_sheet', { name: props.sheetId, user: c.user, write })
       } catch (err) {
         failed.push({ chip: c, err })
       }

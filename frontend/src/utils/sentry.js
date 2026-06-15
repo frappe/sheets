@@ -1,8 +1,8 @@
 // Optional Sentry wiring for the SPA.
 //
-// Only activates when the deploying site sets `spreadsheet_sentry_dsn`
+// Only activates when the deploying site sets `sheets_sentry_dsn`
 // in site_config.json — the value is then injected into the page by
-// spreadsheet/www/spreadsheet.py and surfaces here as
+// sheets/www/sheets.py and surfaces here as
 // `window.frappe.boot.sentry_dsn`. With no DSN this module is a no-op
 // so local development never tries to ship to anyone's project.
 //

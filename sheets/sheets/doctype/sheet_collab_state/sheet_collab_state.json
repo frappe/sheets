@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "autoname": "field:sheet",
+ "creation": "2026-06-03 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "sheet",
+  "byte_size",
+  "last_persisted_at",
+  "ydoc_state"
+ ],
+ "fields": [
+  {
+   "fieldname": "sheet",
+   "fieldtype": "Link",
+   "options": "Sheet",
+   "label": "Sheet",
+   "reqd": 1,
+   "unique": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "byte_size",
+   "fieldtype": "Int",
+   "label": "Stored byte size",
+   "default": "0"
+  },
+  {
+   "fieldname": "last_persisted_at",
+   "fieldtype": "Datetime",
+   "label": "Last persisted at"
+  },
+  {
+   "fieldname": "ydoc_state",
+   "fieldtype": "Long Text",
+   "label": "Y.Doc binary state (base64)",
+   "description": "Opaque base64-encoded Y.Doc binary update. Written and read exclusively by the collab server via the internal collab endpoints; never edited directly."
+  }
+ ],
+ "links": [],
+ "modified": "2026-06-03 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Sheets",
+ "name": "Sheet Collab State",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

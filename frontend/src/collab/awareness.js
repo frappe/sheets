@@ -4,7 +4,7 @@
 // "Awareness" concept — per-client volatile state (cursor, selection,
 // presence) with TTL and merge-on-publish semantics. We don't want the
 // extra dependency, so we re-implement the same shape with the bare
-// minimum the spreadsheet needs:
+// minimum the sheets app needs:
 //
 //   awareness.setLocalState({ cursor: {r, c, subSheet}, user: {...} })
 //   awareness.getStates()  →  Map<clientId, state>

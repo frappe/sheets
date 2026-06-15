@@ -26,7 +26,7 @@ describe('api.call', () => {
 
   it('returns the `message` field on success', async () => {
     fetch.mockResolvedValue(jsonResponse({ message: { name: 'sheet-001' } }))
-    const out = await call('spreadsheet.api.save_sheet', { title: 'x' })
+    const out = await call('sheets.api.save_sheet', { title: 'x' })
     expect(out).toEqual({ name: 'sheet-001' })
   })
 
@@ -43,7 +43,7 @@ describe('api.call', () => {
       { status: 403 },
     ))
     try {
-      await call('spreadsheet.api.get_sheet', { name: 'x' })
+      await call('sheets.api.get_sheet', { name: 'x' })
       throw new Error('expected call() to throw')
     } catch (err) {
       expect(err.excType).toBe('PermissionError')
@@ -59,7 +59,7 @@ describe('api.call', () => {
       { status: 417 },
     ))
     try {
-      await call('spreadsheet.api.get_sheet', { name: 'x' })
+      await call('sheets.api.get_sheet', { name: 'x' })
       throw new Error('expected call() to throw')
     } catch (err) {
       expect(err.message).toBe('Sheet not found')

@@ -1,4 +1,4 @@
-// Minimal `frappe.realtime` shim for the public www/spreadsheet page.
+// Minimal `frappe.realtime` shim for the public www/sheets page.
 //
 // Frappe's full `socketio_client.js` is only loaded by Desk and the
 // `frappe-web` bundle — neither of which runs on our SPA page. Without

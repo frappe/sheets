@@ -242,7 +242,7 @@ export function useVersionHistory({
     try {
       const newName = await _versionsApi.makeACopy(sheetId.value, versionId, title.trim())
       if (newName) {
-        const url = `${window.location.origin}/spreadsheet/sheet/${newName}`
+        const url = `${window.location.origin}/sheets?id=${newName}`
         window.open(url, '_blank')
       }
     } catch (err) {

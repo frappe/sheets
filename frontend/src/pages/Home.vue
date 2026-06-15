@@ -37,7 +37,7 @@
           size="sm"
           class="home-search"
           v-model="searchQuery"
-          placeholder="Search spreadsheets…"
+          placeholder="Search sheets…"
         >
           <template #prefix>
             <FeatherIcon name="search" class="home-search-icon" />
@@ -65,7 +65,7 @@
             @click="setViewMode('list')"
           />
         </div>
-        <Button variant="solid" @click="emit('new')">New Spreadsheet</Button>
+        <Button variant="solid" @click="emit('new')">New Sheet</Button>
       </div>
     </div>
 
@@ -87,9 +87,9 @@
             <rect x="25" y="25" width="13" height="13" rx="2" fill="#e2e2e2"/>
           </svg>
         </div>
-        <p class="home-empty-title">No spreadsheets yet</p>
+        <p class="home-empty-title">No sheets yet</p>
         <p class="home-empty-sub">Create one to get started</p>
-        <Button variant="solid" @click="emit('new')">New Spreadsheet</Button>
+        <Button variant="solid" @click="emit('new')">New Sheet</Button>
       </div>
 
       <!-- No search match (grid only — list mode delegates to ListView's
@@ -185,9 +185,9 @@
     </div>
 
     <!-- Rename dialog -->
-    <Dialog v-model="showRenameDialog" :options="{ title: 'Rename spreadsheet', size: 'sm' }">
+    <Dialog v-model="showRenameDialog" :options="{ title: 'Rename sheet', size: 'sm' }">
       <template #body-content>
-        <FormControl v-model="renameValue" label="New title" placeholder="Untitled Spreadsheet" @keydown.enter="confirmRename" />
+        <FormControl v-model="renameValue" label="New title" placeholder="Untitled Sheet" @keydown.enter="confirmRename" />
       </template>
       <template #actions>
         <div class="flex flex-row-reverse gap-2">
@@ -200,7 +200,7 @@
     <!-- Delete confirm dialog -->
     <Dialog
       v-model="showDeleteDialog"
-      :options="{ title: 'Delete spreadsheet?', size: 'sm' }"
+      :options="{ title: 'Delete sheet?', size: 'sm' }"
     >
       <template #body-content>
         <p class="home-confirm-text">
@@ -343,10 +343,10 @@ const listOptions = computed(() => ({
         description: 'Try a different name.',
       }
     : {
-        title: 'No spreadsheets yet',
+        title: 'No sheets yet',
         description: 'Create one to get started.',
         button: {
-          label: 'New Spreadsheet',
+          label: 'New Sheet',
           variant: 'solid',
           onClick: () => emit('new'),
         },
@@ -391,7 +391,7 @@ onMounted(fetchSheets)
 async function fetchSheets() {
   loading.value = true
   try {
-    sheets.value = await call('spreadsheet.api.list_sheets')
+    sheets.value = await call('sheets.api.list_sheets')
   } finally {
     loading.value = false
   }
@@ -417,7 +417,7 @@ async function doDelete() {
   if (!deleteTarget.value) return
   deleting.value = true
   try {
-    await call('spreadsheet.api.delete_sheet', { name: deleteTarget.value.name })
+    await call('sheets.api.delete_sheet', { name: deleteTarget.value.name })
     sheets.value = sheets.value.filter(s => s.name !== deleteTarget.value.name)
     showDeleteDialog.value = false
   } catch (err) {
@@ -440,7 +440,7 @@ async function confirmRename() {
   if (!target || !title) return
   renaming.value = true
   try {
-    await call('spreadsheet.api.rename_sheet', { name: target.name, title })
+    await call('sheets.api.rename_sheet', { name: target.name, title })
     const found = sheets.value.find(s => s.name === target.name)
     if (found) found.title = title
     showRenameDialog.value = false
@@ -451,7 +451,7 @@ async function confirmRename() {
 
 async function duplicate(sheet) {
   try {
-    await call('spreadsheet.api.duplicate_sheet', { name: sheet.name })
+    await call('sheets.api.duplicate_sheet', { name: sheet.name })
     // Refresh the listing so the new doc shows up with its modified timestamp.
     await fetchSheets()
   } catch (err) {
@@ -495,7 +495,7 @@ async function duplicate(sheet) {
   flex-shrink: 0;
 }
 
-/* Right-aligned cluster: search + view toggle + New Spreadsheet button.
+/* Right-aligned cluster: search + view toggle + New Sheet button.
    `margin-left: auto` pushes the whole group to the right edge, leaving
    the brand mark anchored at the left. */
 .home-topbar-right {

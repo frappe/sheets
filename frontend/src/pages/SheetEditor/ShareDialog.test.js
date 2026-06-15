@@ -124,7 +124,7 @@ beforeEach(() => {
   // get_sheet_shares fetches when the dialog opens — return an empty
   // member list so the dialog mounts cleanly.
   call.mockImplementation((method) => {
-    if (method === 'spreadsheet.api.get_sheet_shares') return Promise.resolve([])
+    if (method === 'sheets.api.get_sheet_shares') return Promise.resolve([])
     return Promise.resolve({})
   })
   // window.frappe.session — read by ownerFullName computed.
@@ -154,7 +154,7 @@ describe('ShareDialog — chip-staged invite flow', () => {
     // Drive it via the search input + mocked get_list response so the
     // result row renders, then click the result.
     call.mockImplementation((method, args) => {
-      if (method === 'spreadsheet.api.get_sheet_shares') return Promise.resolve([])
+      if (method === 'sheets.api.get_sheet_shares') return Promise.resolve([])
       if (method === 'frappe.client.get_list') {
         return Promise.resolve([
           { name: 'bob@example.com', full_name: 'Bob', user_image: '' },
@@ -178,7 +178,7 @@ describe('ShareDialog — chip-staged invite flow', () => {
     // The chip surfaces the user's email. share_sheet must NOT have
     // been called yet — chips are staged, not committed.
     await waitFor(() => screen.getByText('bob@example.com'))
-    const shareSheetCalls = call.mock.calls.filter(([m]) => m === 'spreadsheet.api.share_sheet')
+    const shareSheetCalls = call.mock.calls.filter(([m]) => m === 'sheets.api.share_sheet')
     expect(shareSheetCalls).toHaveLength(0)
   })
 
@@ -188,14 +188,14 @@ describe('ShareDialog — chip-staged invite flow', () => {
     await waitFor(() => screen.getByText('Members'))
 
     call.mockImplementation((method, args) => {
-      if (method === 'spreadsheet.api.get_sheet_shares') return Promise.resolve([])
+      if (method === 'sheets.api.get_sheet_shares') return Promise.resolve([])
       if (method === 'frappe.client.get_list') {
         const q = args?.filters?.find(f => f[1] === 'like')?.[2] || ''
         if (q.includes('bob')) return Promise.resolve([{ name: 'bob@example.com', full_name: 'Bob' }])
         if (q.includes('car')) return Promise.resolve([{ name: 'carol@example.com', full_name: 'Carol' }])
         return Promise.resolve([])
       }
-      if (method === 'spreadsheet.api.share_sheet') return Promise.resolve({ status: 'ok' })
+      if (method === 'sheets.api.share_sheet') return Promise.resolve({ status: 'ok' })
       return Promise.resolve({})
     })
 
@@ -221,11 +221,11 @@ describe('ShareDialog — chip-staged invite flow', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Invite' }))
 
     await waitFor(() => {
-      const shareCalls = call.mock.calls.filter(([m]) => m === 'spreadsheet.api.share_sheet')
+      const shareCalls = call.mock.calls.filter(([m]) => m === 'sheets.api.share_sheet')
       expect(shareCalls).toHaveLength(2)
     })
 
-    const shareCalls = call.mock.calls.filter(([m]) => m === 'spreadsheet.api.share_sheet')
+    const shareCalls = call.mock.calls.filter(([m]) => m === 'sheets.api.share_sheet')
     const users = shareCalls.map(c => c[1].user).sort()
     expect(users).toEqual(['bob@example.com', 'carol@example.com'])
     // All chips invited with write=1 because the selected role was "Can edit"
@@ -239,14 +239,14 @@ describe('ShareDialog — chip-staged invite flow', () => {
 
     let inviteCallCount = 0
     call.mockImplementation((method, args) => {
-      if (method === 'spreadsheet.api.get_sheet_shares') return Promise.resolve([])
+      if (method === 'sheets.api.get_sheet_shares') return Promise.resolve([])
       if (method === 'frappe.client.get_list') {
         const q = args?.filters?.find(f => f[1] === 'like')?.[2] || ''
         if (q.includes('bob'))   return Promise.resolve([{ name: 'bob@example.com',   full_name: 'Bob' }])
         if (q.includes('car'))   return Promise.resolve([{ name: 'carol@example.com', full_name: 'Carol' }])
         return Promise.resolve([])
       }
-      if (method === 'spreadsheet.api.share_sheet') {
+      if (method === 'sheets.api.share_sheet') {
         inviteCallCount++
         // First call succeeds (Bob), second fails (Carol).
         if (inviteCallCount === 1) return Promise.resolve({ status: 'ok' })

@@ -258,7 +258,7 @@ export function useCollaboration({
     } else {
       // Legacy path — seed locally, relay through frappe.realtime.
       hydrateYDoc(_doc, { sheet: sheet?.snapshot?.() })
-      // The www/spreadsheet page doesn't load Frappe's socketio_client,
+      // The www/sheets page doesn't load Frappe's socketio_client,
       // so `window.frappe.realtime` is undefined and the legacy path
       // would have no transport. ensureFrappeRealtime stands up a minimal
       // shim against the site's socketio namespace on first use; no-op

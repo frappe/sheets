@@ -1,0 +1,74 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-05-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "parent_sheet",
+  "sheet_name",
+  "cell_id",
+  "raw_value",
+  "format_json"
+ ],
+ "fields": [
+  {
+   "fieldname": "parent_sheet",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Parent Sheet",
+   "options": "Sheet",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "sheet_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sheet Name",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "cell_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Cell ID",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "raw_value",
+   "fieldtype": "Long Text",
+   "label": "Raw Value"
+  },
+  {
+   "fieldname": "format_json",
+   "fieldtype": "Long Text",
+   "label": "Format JSON"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-05-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Sheets",
+ "name": "Sheet Cell",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
