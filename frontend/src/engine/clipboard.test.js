@@ -78,3 +78,33 @@ describe('clipboard — destination-aware paste', () => {
     expect(sheet.getCell('C1')).toBe('')
   })
 })
+
+describe('clipboard — cut clears the source but not overlapping dest cells', () => {
+  it('cut C2:C7 then paste at C3:C8 shifts the column down by one row', () => {
+    // Repro for the "all values vanish, only the last survives" bug: the
+    // cut-clear pass used to wipe the whole source range, including cells
+    // that had just received the pasted content.
+    const sheet = makeSheet({ C2: '1', C3: '2', C4: '3', C5: '4', C6: '5', C7: '6' })
+    const cb = createClipboard({ sheet })
+    cb.cut({ r0: 1, c0: 2, r1: 6, c1: 2 })                    // C2:C7
+    cb.paste('C3', null, 'all', { r0: 2, c0: 2, r1: 7, c1: 2 }) // C3:C8
+    expect(sheet.getCell('C2')).toBe('')                       // source-only cell vacated
+    expect(sheet.getCell('C3')).toBe('1')
+    expect(sheet.getCell('C4')).toBe('2')
+    expect(sheet.getCell('C5')).toBe('3')
+    expect(sheet.getCell('C6')).toBe('4')
+    expect(sheet.getCell('C7')).toBe('5')
+    expect(sheet.getCell('C8')).toBe('6')
+  })
+
+  it('cut still fully vacates the source when there is no overlap', () => {
+    const sheet = makeSheet({ A1: '1', A2: '2' })
+    const cb = createClipboard({ sheet })
+    cb.cut({ r0: 0, c0: 0, r1: 1, c1: 0 })                    // A1:A2
+    cb.paste('C1', null, 'all')                                // C1:C2 — no overlap
+    expect(sheet.getCell('A1')).toBe('')
+    expect(sheet.getCell('A2')).toBe('')
+    expect(sheet.getCell('C1')).toBe('1')
+    expect(sheet.getCell('C2')).toBe('2')
+  })
+})

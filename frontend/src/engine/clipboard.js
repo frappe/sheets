@@ -168,10 +168,16 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		// Only consume the cut buffer when we actually moved content.
 		if (_mode === 'cut' && _srcSel && (kind === 'all' || kind === 'values' || kind === 'formulas')) {
 			const { r0, c0, r1, c1 } = _srcSel
+			// Cells that just received the paste — when source and destination
+			// overlap (e.g. cut C2:C7, paste at C3:C8) the clear pass must NOT
+			// touch these or it wipes the content we just wrote. Only the source
+			// cells outside the destination should be vacated.
+			const destIds = new Set(targets.map(({ r, c }) => colLabel(c) + (r + 1)))
 			const clears = {}
 			for (let r = r0; r <= r1; r++)
 				for (let c = c0; c <= c1; c++) {
 					const id = colLabel(c) + (r + 1)
+					if (destIds.has(id)) continue
 					clears[id] = ''
 					if (formats)    formats.clear(id, sh)
 					if (validation) validation.clear(id, sh)
