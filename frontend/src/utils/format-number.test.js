@@ -191,6 +191,22 @@ describe('applyNumberFmt — date variants', () => {
   it('non-numeric value passes through (no ms-since-epoch to parse)', () => {
     expect(applyNumberFmt('hello', 'date:dmy')).toBe('hello')
   })
+
+  // Regression: datetime *strings* (e.g. Frappe creation/modified columns)
+  // were parseFloat'd to a small int and rendered as 1970-01-01.
+  it('parses a datetime string with microseconds (not 1970)', () => {
+    expect(applyNumberFmt('2026-03-15 14:50:30.789345', 'date:ymd')).toBe('2026-03-15')
+    expect(applyNumberFmt('2026-03-15 14:50:30.789345', 'date:dmy')).toBe('15/03/2026')
+  })
+
+  it('parses a bare date string', () => {
+    expect(applyNumberFmt('2026-01-08', 'date:ymd')).toBe('2026-01-08')
+  })
+
+  it('time/datetime read the same string', () => {
+    expect(applyNumberFmt('2026-03-15 14:50:30.789345', 'time:hm')).toBe('14:50')
+    expect(applyNumberFmt('2026-03-15 14:50:30.789345', 'datetime:ymd_hm')).toBe('2026-03-15, 14:50')
+  })
 })
 
 describe('applyNumberFmt — time variants', () => {
