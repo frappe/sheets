@@ -93,10 +93,13 @@
         <span class="sn-topbar-divider" aria-hidden="true" />
         <!-- Notes: button toggles the side panel listing all notes across sheets.
              Shift+F2 still opens the per-cell inline editor for quick capture. -->
-        <Button :variant="notesPanel.open ? 'subtle' : 'ghost'"
-                size="sm" icon="lucide-message-square"
-                :tooltip="`Notes${allNotes.length ? ` (${allNotes.length})` : ''} — Shift+F2 to add`"
-                @click="toggleNotesPanel" />
+        <span class="sn-notes-btn-wrap">
+          <Button :variant="notesPanel.open ? 'subtle' : 'ghost'"
+                  size="sm" icon="lucide-message-square"
+                  :tooltip="`Notes${allNotes.length ? ` (${allNotes.length})` : ''} — Shift+F2 to add`"
+                  @click="toggleNotesPanel" />
+          <span v-if="allNotes.length" class="sn-notes-badge">{{ allNotes.length > 9 ? '9+' : allNotes.length }}</span>
+        </span>
         <!-- Variant flips to "subtle" while the panel is open so the trigger
              reads as toggled, matching Frappe UI's standard toggle pattern. -->
         <Button :variant="vhOpen ? 'subtle' : 'ghost'"
@@ -4580,6 +4583,17 @@ function toggleShowFormulas() {
 /* Hairline between action buttons and avatar — groups the cluster without
    relying on extra padding. */
 .sn-topbar-divider { width:1px; height:20px; background:var(--outline-gray-2); margin:0 4px; flex-shrink:0; }
+/* Notes count badge — workbook-wide, shares the comment-triangle red so the
+   topbar signal and the per-cell markers read as one system. */
+.sn-notes-btn-wrap { position:relative; display:inline-flex; }
+.sn-notes-badge {
+  position:absolute; top:-3px; right:-3px; box-sizing:border-box;
+  min-width:15px; height:15px; padding:0 3px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:9px; font-weight:600; line-height:1; color:#fff;
+  background:#E8523A; border-radius:999px; border:1.5px solid var(--surface-white);
+  pointer-events:none;
+}
 
 /* Brand-coloured current-user avatar. Avatar's inner label uses
    `bg-surface-gray-2 text-ink-gray-5` by default — we override both so the
