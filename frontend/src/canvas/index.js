@@ -1533,7 +1533,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       rowH:       { ...rowH },
       freezeRows: freeze.rows || 0,
       freezeCols: freeze.cols || 0,
-      hiddenRows: Array.from(hiddenRows),
+      // Only MANUAL hides belong in the per-sheet view. Filter hides are
+      // transient and derived per-sheet from the sortFilter engine; baking
+      // them in here leaked one sheet's filter onto others (they were read
+      // back as manual hides and re-applied everywhere).
+      hiddenRows: Array.from(hiddenRows).filter(r => !filterHiddenRows.has(r)),
       hiddenCols: Array.from(hiddenCols),
       totalRows:  TOTAL_ROWS,
       totalCols:  TOTAL_COLS,
@@ -1551,6 +1555,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     freeze.cols = snap.freezeCols || 0
     hiddenRows.clear()
     for (const r of (snap.hiddenRows || [])) hiddenRows.add(r)
+    // Filter hides are transient and re-applied per-sheet by _applyHiddenRows;
+    // drop any stale tag from the previous sheet so it can't bleed through.
+    filterHiddenRows.clear()
     hiddenCols.clear()
     for (const c of (snap.hiddenCols || [])) hiddenCols.add(c)
     if (typeof snap.totalRows === 'number') setTotalRows(snap.totalRows)

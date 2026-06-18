@@ -2763,9 +2763,18 @@ async function _loadInitialData() {
     if (restored) {
       freezeRows.value = restored.freezeRows || 0
       freezeCols.value = restored.freezeCols || 0
-      manualHiddenRows.clear(); for (const r of (restored.hiddenRows || [])) manualHiddenRows.add(r)
+      // Legacy docs (saved before filter hides were split out of the view)
+      // baked the active sheet's filter rows into hiddenRows. Strip the
+      // sheet's current filter rows so they aren't mistaken for manual hides
+      // and re-applied to every sheet. Harmless for clean docs.
+      const filterHidden = new Set(sortFilter.computeHiddenRows(sheet.getCurrentSheet()))
+      manualHiddenRows.clear()
+      for (const r of (restored.hiddenRows || [])) if (!filterHidden.has(r)) manualHiddenRows.add(r)
       manualHiddenCols.clear(); for (const c of (restored.hiddenCols || [])) manualHiddenCols.add(c)
     }
+    // The view now holds manual hides only; re-apply the active sheet's filter
+    // so a saved filter still shows its hidden rows on first load.
+    _applyHiddenRows()
     syncNames()
     activeCell.value   = 'A1'
     formulaValue.value = sheet.getCell('A1')
