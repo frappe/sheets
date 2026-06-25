@@ -1196,7 +1196,13 @@ const sortFilter = createSortFilter(sheet)
 const comments   = createCommentsEngine()
 const validation = createValidationEngine()
 const condFormat = createCondFormatEngine()
-const clipboard  = createClipboard({ sheet, formats, condFormat, validation })
+const clipboard  = createClipboard({
+  sheet, formats, condFormat, validation,
+  // Late-bound to the pivot integration (declared below). Only invoked at
+  // copy/paste time, long after setup runs, so the forward reference is safe.
+  getPivotAt: (sel, sn) => getPivotAt(sel, sn),
+  createPivotFromPaste: (blob, anchorId, sn) => createPastedPivot(blob, anchorId, sn),
+})
 const pivot      = createPivotEngine()
 const charts     = createChartEngine()
 // Named ranges: the validator hook prevents users from defining names that
@@ -2252,9 +2258,9 @@ const {
   pivotDialogOpen, pivotInitialRange, pivotEditId, pivotEditConfig, pivotVersion, pivotBuilding,
   activePivotConfig, pivotFabStyle, pivotHighlightStyle, pivotBannerMenuOptions,
   isPivotSheet, openPivotDialog, onPivotEdit, onPivotRefresh, onPivotDelete, onPivotConfirm,
-  recomputePivotsForSheet, drillDownAt,
+  recomputePivotsForSheet, drillDownAt, getPivotAt, createPastedPivot,
 } = usePivotIntegration({
-  pivot, sheet, formats, currentSheet, renderVersion,
+  pivot, sheet, formats, currentSheet, activeCell, renderVersion,
   getGrid: () => grid,
   contextMenu, switchSheet, syncNames,
   history, isDirty, repopulateGrid: _repopulateGrid,
@@ -3533,11 +3539,26 @@ function onDocCut(e) {
   grid.setMarchingAnts(src)
   _pushEditOp(sn, before, 'Cut')
 }
-function onDocPaste(e) {
+async function onDocPaste(e) {
   if (!_canvasActive()) return
   e.preventDefault()
   const destSel = grid.getSelection()
   const sn = sheet.getCurrentSheet()
+
+  // Pasting a copied pivot mints a new live pivot at the anchor rather than
+  // writing cells, so the op-based cell-diff undo below can't capture it (it
+  // would leave the rendered cells without their _pivots registry entry).
+  // Await the async render, then take one full history.push() snapshot, which
+  // captures both the pivot registry and the written cells atomically.
+  if (clipboard.hasData() && clipboard.getPivotBlob?.()) {
+    await clipboard.paste(activeCell.value, () => {}, 'all', destSel)
+    clipboardHas.value = clipboard.hasData()
+    grid.setMarchingAnts(null)
+    history.push()
+    isDirty.value = true
+    return
+  }
+
   // Snapshot the pre-paste state for cells + formats + validation across
   // the destination rect, plus cond-format rule count for the fallback
   // decision. The cells+formats+validation diff drives op-based undo; if
