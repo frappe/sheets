@@ -49,20 +49,20 @@
              one switches to `subtle` so it inverts against the row. -->
         <div class="home-viewtoggle" role="tablist" aria-label="View mode">
           <Button
-            :variant="viewMode === 'grid' ? 'subtle' : 'ghost'"
-            size="sm" icon="grid"
-            tooltip="Grid view"
-            role="tab"
-            :aria-selected="viewMode === 'grid'"
-            @click="setViewMode('grid')"
-          />
-          <Button
             :variant="viewMode === 'list' ? 'subtle' : 'ghost'"
             size="sm" icon="list"
             tooltip="List view"
             role="tab"
             :aria-selected="viewMode === 'list'"
             @click="setViewMode('list')"
+          />
+          <Button
+            :variant="viewMode === 'grid' ? 'subtle' : 'ghost'"
+            size="sm" icon="grid"
+            tooltip="Grid view"
+            role="tab"
+            :aria-selected="viewMode === 'grid'"
+            @click="setViewMode('grid')"
           />
         </div>
         <Button variant="solid" @click="emit('new')">New Sheet</Button>
@@ -482,7 +482,7 @@ async function duplicate(sheet) {
   align-items: center;
   gap: 16px;
   padding: 0 32px;
-  height: 60px;
+  height: 48px;
   background: var(--surface-white);
   border-bottom: 1px solid var(--outline-gray-2);
   flex-shrink: 0;
