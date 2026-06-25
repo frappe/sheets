@@ -4522,15 +4522,22 @@ function confirmInsertMany() {
 
 function doDeleteRow() {
   contextMenu.open = false
-  const atRow = contextMenu.targetRow
   const sn = sheet.getCurrentSheet()
-  sheet.deleteRow(atRow)
-  formats.deleteRow(atRow, sn)
-  comments.deleteRow(atRow, sn)
-  validation.deleteRow(atRow, sn)
-  condFormat.deleteRow(atRow, sn)
-  sortFilter.deleteRow(atRow, sn)
-  grid.shiftRowHeights(atRow + 1, -1)
+  // Same span logic as doDeleteCol: delete the whole selected row block when
+  // the right-clicked row falls inside it, else just the targeted row.
+  const sel = grid.getSelection()
+  const within = sel && contextMenu.targetRow >= sel.r0 && contextMenu.targetRow <= sel.r1
+  const start  = within ? sel.r0 : contextMenu.targetRow
+  const count  = within ? sel.r1 - sel.r0 + 1 : 1
+  for (let i = 0; i < count; i++) {
+    sheet.deleteRow(start)
+    formats.deleteRow(start, sn)
+    comments.deleteRow(start, sn)
+    validation.deleteRow(start, sn)
+    condFormat.deleteRow(start, sn)
+    sortFilter.deleteRow(start, sn)
+    grid.shiftRowHeights(start + 1, -1)
+  }
   _repopulateGrid()
   _applyHiddenRows()
   markEdited()
@@ -4557,15 +4564,23 @@ function doInsertCol(right = false, count = 1) {
 
 function doDeleteCol() {
   contextMenu.open = false
-  const atCol = contextMenu.targetCol
   const sn = sheet.getCurrentSheet()
-  sheet.deleteCol(atCol)
-  formats.deleteCol(atCol, sn)
-  comments.deleteCol(atCol, sn)
-  validation.deleteCol(atCol, sn)
-  condFormat.deleteCol(atCol, sn)
-  sortFilter.deleteCol(atCol, sn)
-  grid.shiftColWidths(atCol + 1, -1)
+  // When the right-clicked column is inside a multi-column selection, delete
+  // every selected column; otherwise just the targeted one. Each delete shifts
+  // the rest left, so the block start index stays fixed across iterations.
+  const sel = grid.getSelection()
+  const within = sel && contextMenu.targetCol >= sel.c0 && contextMenu.targetCol <= sel.c1
+  const start  = within ? sel.c0 : contextMenu.targetCol
+  const count  = within ? sel.c1 - sel.c0 + 1 : 1
+  for (let i = 0; i < count; i++) {
+    sheet.deleteCol(start)
+    formats.deleteCol(start, sn)
+    comments.deleteCol(start, sn)
+    validation.deleteCol(start, sn)
+    condFormat.deleteCol(start, sn)
+    sortFilter.deleteCol(start, sn)
+    grid.shiftColWidths(start + 1, -1)
+  }
   _repopulateGrid()
   _applyHiddenRows()
   markEdited()
