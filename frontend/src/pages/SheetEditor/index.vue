@@ -1163,6 +1163,10 @@ const sheet = createSheet({
     // per-rule min/max stats — any cell change can shift those bounds, so the
     // cache must be cleared before the next paint.
     condFormat?.invalidate()
+    // A chart may source from this cell — bump the chart data version so the
+    // overlay's matrix cache re-pulls. Drag/resize/scroll don't fire cell-change
+    // callbacks, so those keep hitting the cache (the reason it exists).
+    chartDataVersion.value++
     if (showFormulas.value) {
       grid?.setCell(id, String(sheet.getCell(id) ?? ''))
       return
@@ -1181,6 +1185,9 @@ const sheet = createSheet({
   //     onCellsChanged at 181 ms self time after the snapshot fix.
   onCellsChanged(_sheet, affected) {
     condFormat?.invalidate()
+    // Source data for any chart may have moved — invalidate the overlay's matrix
+    // cache (kept stale on drag/scroll, which don't reach this callback).
+    chartDataVersion.value++
     if (!affected) { _repopulateGrid(); return }
     const sn = sheet.getCurrentSheet()
     for (const id of affected) {
@@ -1188,6 +1195,10 @@ const sheet = createSheet({
       const displayValue = sheet.getDisplayValue(id)
       grid?.setCell(id, fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue)
     }
+    // A bulk edit (paste/fill) can change a pivot's source data; recompute so
+    // pivot output cells don't lag. affectsPivot() short-circuits when this
+    // sheet feeds no pivot, keeping the cheap incremental path cheap.
+    recomputePivotsForSheet(sn)
   },
 })
 const formats    = createFormatsEngine()
@@ -3650,7 +3661,8 @@ function doPasteSpecial(kind) {
     syncFlags()
   }
   isDirty.value = true
-  recomputePivotsForSheet(sheet.getCurrentSheet())
+  // Pivot recompute is handled centrally: the paste routed through
+  // batchSetCells, whose onCellsChanged callback recomputes affected pivots.
 }
 
 // Push the right history entry for a paste. Cell + format + validation

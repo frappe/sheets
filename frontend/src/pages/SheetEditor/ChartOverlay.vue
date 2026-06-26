@@ -65,9 +65,10 @@ const props = defineProps({
   // (sourceSheet, sourceRange) → 2D matrix. Caller-owned so it can pull from
   // the sheet engine and re-derive on cell edits.
   getMatrix:    { type: Function, required: true },
-  // Bumps when the source data should be re-pulled (refresh). Part of the
-  // matrix cache key so position-only re-renders (drag/resize) reuse the
-  // cached matrix instead of re-materialising it every frame.
+  // Bumps when the source data should be re-pulled — on refresh and on any
+  // sheet cell edit, but NOT on drag/resize/scroll. Part of the matrix cache
+  // key so position-only re-renders (drag/resize) reuse the cached matrix
+  // instead of re-materialising it every frame, while edits refresh the chart.
   dataVersion:  { type: Number, default: 0 },
   selectedId:   { type: String, default: '' },
   // When true the whole overlay is hidden (e.g. while the chart dialog is
