@@ -115,6 +115,10 @@ export function useCollaboration({
   currentSheet,
   getSheet,
   repopulateGrid,
+  // Reactive gate — when false (e.g. a logged-out guest on a public link) we
+  // never stand up a provider. Defaults to an always-true ref so existing
+  // callers and tests are unaffected.
+  canCollaborate = { value: true },
   _self        = window.frappe?.session?.user,
   _realtime    = window.frappe?.realtime,
   _callFn      = (method, args) => call(method, args),
@@ -343,8 +347,8 @@ export function useCollaboration({
   }
 
   _watch(sheetId, docId => {
-    if (docId && docId !== 'new') _start(docId)
-    else                          _stop()
+    if (docId && docId !== 'new' && canCollaborate.value) _start(docId)
+    else                                                  _stop()
   }, { immediate: true })
 
   _onUnmounted(_stop)

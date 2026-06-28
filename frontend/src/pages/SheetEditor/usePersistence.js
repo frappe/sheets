@@ -13,6 +13,13 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
   // editor so it can render a proper error screen instead of mounting a
   // blank canvas. Shape: { kind: 'denied' | 'missing' | 'other', message }.
   const loadError = ref(null)
+  // Access flags from get_sheet. `canWrite` drives the editor's read-only
+  // mode (false for guests and view-only viewers); `isPublic` powers the
+  // "Public" indicator + the share dialog's public-link toggle. Default
+  // canWrite=true so a brand-new ('new') sheet — which the owner is creating —
+  // is editable before its first load resolves.
+  const canWrite = ref(true)
+  const isPublic = ref(false)
 
   async function loadSheet(name) {
     loadError.value = null
@@ -36,6 +43,11 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
       if (saved.charts     && charts?.restore)     charts.restore(saved.charts)
       if (saved.namedRanges && namedRanges?.restore) namedRanges.restore(saved.namedRanges)
       currentTitle.value = doc.title
+      // get_sheet reports whether this caller may write and whether the sheet
+      // is publicly linked. A guest / view-only sharee gets can_write=false →
+      // the editor renders read-only.
+      canWrite.value = doc.can_write !== false
+      isPublic.value = !!doc.is_public
     } catch (err) {
       console.error('Load failed:', err)
       const t = err?.excType || ''
@@ -164,5 +176,5 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
     }
   }
 
-  return { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, retrySave }
+  return { isSaving, saveError, loadError, canWrite, isPublic, loadSheet, autoCreate, saveExisting, retrySave }
 }

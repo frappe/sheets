@@ -8,7 +8,8 @@
   "title",
   "sheets_data",
   "head_seq",
-  "head_snapshot"
+  "head_snapshot",
+  "is_public"
  ],
  "fields": [
   {
@@ -35,6 +36,13 @@
    "fieldtype": "Link",
    "options": "Sheet Snapshot",
    "label": "Latest snapshot"
+  },
+  {
+   "fieldname": "is_public",
+   "fieldtype": "Check",
+   "label": "Anyone with the link can view",
+   "default": "0",
+   "description": "When set, anyone with the link can open this sheet read-only — no login required."
   }
  ],
  "links": [],

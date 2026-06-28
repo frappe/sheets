@@ -106,13 +106,11 @@ class CustomShareNotification(unittest.TestCase):
         # And the failure was logged for observability.
         self.frappe.log_error.assert_called_once()
 
-    def test_everyone_share_does_not_send_a_per_user_notification(self):
-        # everyone=1 shares aren't addressed to a specific user, so no
-        # personalised notification makes sense. The original notify=False
-        # path on the everyone branch is already correct; this guards
-        # that we didn't accidentally introduce a notification dispatch
-        # there.
+    def test_public_link_does_not_send_a_notification(self):
+        # Public access is now a flag on the Sheet (set_sheet_public), not a
+        # per-user grant — there's no recipient to email, so no notification
+        # should ever fire from flipping the public link on.
         from sheets import api
 
-        api.share_sheet("SH-1", everyone=1, write=1)
+        api.set_sheet_public("SH-1", public=1)
         self.frappe.sendmail.assert_not_called()

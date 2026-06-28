@@ -32,6 +32,10 @@ export function useShortcuts(actions) {
     clipboard, clipboardHas, setMarchingAnts,
     fillDown, fillRight,
     runSmartFill,
+    // Optional getter — true for a view-only viewer (guest / read-only share).
+    // When set, shortcuts that would mutate the sheet are swallowed; pure
+    // navigation / view shortcuts (find, zoom, formula-peek, escape) stay live.
+    readOnly = () => false,
   } = actions
 
   function _isInInput() {
@@ -40,6 +44,9 @@ export function useShortcuts(actions) {
   }
 
   function _handleFormatKeys(e, mod, inInput) {
+    // Viewer: undo/redo/format/repeat all mutate — swallow them so a stray
+    // Cmd+B doesn't paint local-only changes the viewer can never save.
+    if (readOnly()) return false
     if (mod && e.key === 'z' && !e.shiftKey)                              { e.preventDefault(); undo();                         return true }
     if (mod && (e.key === 'y' || (e.shiftKey && e.key === 'z')))          { e.preventDefault(); redo();                         return true }
     if (mod && e.key === 'b' && !inInput)                                  { e.preventDefault(); toggleFmt('bold');              return true }
@@ -91,13 +98,16 @@ export function useShortcuts(actions) {
     if (_handleViewKeys(e, mod, inInput))   return
     if (_handleNavKeys(e, mod, inInput))    return
     if (_handleEscape(e, inInput))          return
-    if (mod && e.key === 'd' && !inInput) { e.preventDefault(); fillDown();  return }
-    if (mod && e.key === 'r' && !inInput) { e.preventDefault(); fillRight(); return }
-    // Cmd/Ctrl+E — Smart Fill. Matches Excel's Flash Fill shortcut. Detects
-    // a pattern from the user's example values in the selected column and
-    // fills the remaining empty cells in the selection.
-    if (mod && (e.key === 'e' || e.key === 'E') && !inInput) {
-      e.preventDefault(); runSmartFill?.(); return
+    // Fill / smart-fill mutate — disabled for viewers.
+    if (!readOnly()) {
+      if (mod && e.key === 'd' && !inInput) { e.preventDefault(); fillDown();  return }
+      if (mod && e.key === 'r' && !inInput) { e.preventDefault(); fillRight(); return }
+      // Cmd/Ctrl+E — Smart Fill. Matches Excel's Flash Fill shortcut. Detects
+      // a pattern from the user's example values in the selected column and
+      // fills the remaining empty cells in the selection.
+      if (mod && (e.key === 'e' || e.key === 'E') && !inInput) {
+        e.preventDefault(); runSmartFill?.(); return
+      }
     }
   }
 

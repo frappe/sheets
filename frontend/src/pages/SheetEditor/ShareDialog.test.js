@@ -279,3 +279,54 @@ describe('ShareDialog — chip-staged invite flow', () => {
     })
   })
 })
+
+describe('ShareDialog — public link (general access)', () => {
+  it('seeds the toggle from the isPublic prop on open', async () => {
+    _mountDialog({ isPublic: true })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+    // The public-only access hint renders only when the toggle is 'public',
+    // so its presence proves the dialog seeded from the prop.
+    expect(screen.getByText(/no sign-in required/i)).toBeTruthy()
+  })
+
+  it('defaults to Restricted when isPublic is false', async () => {
+    _mountDialog({ isPublic: false })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+    expect(screen.getByText(/Only people added below/i)).toBeTruthy()
+    expect(screen.queryByText(/no sign-in required/i)).toBeNull()
+  })
+
+  it('switching to "Anyone with the link" calls set_sheet_public and emits public-changed', async () => {
+    const { emitted } = _mountDialog({ isPublic: false })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+
+    // The access dropdown stub renders each option as a button by label.
+    await fireEvent.click(screen.getByRole('button', { name: 'Anyone with the link' }))
+
+    await waitFor(() => {
+      const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 1 })
+    })
+    // Editor is notified so its topbar "Public" badge updates.
+    expect(emitted()['public-changed']?.[0]).toEqual([true])
+  })
+
+  it('switching back to Restricted calls set_sheet_public with public: 0', async () => {
+    const { emitted } = _mountDialog({ isPublic: true })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Restricted' }))
+
+    await waitFor(() => {
+      const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 0 })
+    })
+    expect(emitted()['public-changed']?.[0]).toEqual([false])
+  })
+})

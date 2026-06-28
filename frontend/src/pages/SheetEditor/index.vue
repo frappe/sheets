@@ -81,6 +81,22 @@
             @click="onRetrySave"
           />
         </template>
+        <!-- View-only badge for guests / read-only sharees so it's never
+             ambiguous why editing is disabled. -->
+        <Badge
+          v-if="readOnly"
+          theme="gray" variant="subtle" size="sm"
+          label="View only"
+          tooltip="You have read-only access to this sheet"
+        />
+        <!-- Public indicator for the owner/editors — surfaces that the sheet
+             is exposed via a public link (the missing transparency signal). -->
+        <Badge
+          v-else-if="isPublic"
+          theme="blue" variant="subtle" size="sm"
+          label="Public"
+          tooltip="Anyone with the link can view this sheet"
+        />
       </div>
       <div class="sn-topbar-right">
         <!-- AI Assist entry point — shown only when an admin has configured a
@@ -143,8 +159,10 @@
             :title="`${presentUsers.length - 3} more people`"
           >+{{ presentUsers.length - 3 }}</span>
         </div>
-        <!-- Share -->
+        <!-- Share — hidden for read-only viewers (guests can't grant access,
+             and get_sheet_shares would 403 for them anyway). -->
         <Button
+          v-if="!readOnly"
           variant="ghost"
           size="sm"
           icon="share-2"
@@ -152,7 +170,7 @@
           tooltip="Share this sheet"
           @click="shareOpen = true"
         />
-        <span class="sn-topbar-divider" aria-hidden="true" />
+        <span v-if="!readOnly" class="sn-topbar-divider" aria-hidden="true" />
         <Avatar
           :label="userInitial"
           :image="userImage || undefined"
@@ -793,7 +811,9 @@
       :sheet-id="props.id"
       :sheet-title="currentTitle"
       :owner-id="userEmail"
+      :is-public="isPublic"
       @shares-changed="shareCount = $event"
+      @public-changed="isPublic = $event"
     />
 
     <!-- AI Assist settings (in-app, never the desk form) -->
@@ -2197,7 +2217,7 @@ const textWrapDropdownOptions = computed(() => [
 // fallbacks only cover the impossible window where someone saves before
 // useSheetTabs has finished initializing.
 let _sheetTabs = null
-const { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
+const { isSaving, saveError, loadError, canWrite, isPublic, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
     sheet, formats, merge, comments, validation, condFormat, sortFilter, pivot,
     charts, namedRanges,
@@ -2208,6 +2228,13 @@ const { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, ret
     },
     currentTitle, emit,
   })
+
+// Read-only mode: a guest or a view-only sharee can open a sheet but must not
+// mutate it. `canWrite` comes from get_sheet (false for guests / viewers); the
+// server already rejects their writes, so this is the UX layer that stops us
+// even attempting them (no autosave chips, no editable cells, no Share grant).
+const isGuest  = computed(() => (window.frappe?.session?.user || 'Guest') === 'Guest')
+const readOnly = computed(() => !canWrite.value)
 
 _sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
@@ -2285,6 +2312,10 @@ const { presentUsers, remoteCursors, broadcastCellChange, broadcastBatchChange, 
     currentSheet,
     getSheet:       () => sheet,
     repopulateGrid: _repopulateGrid,
+    // Guests viewing a public link don't collaborate — the collab server
+    // rejects the Guest session anyway, so skip the doomed socket and just
+    // show the static snapshot loaded by get_sheet.
+    canCollaborate: computed(() => !isGuest.value),
   })
 // Wire the binding's per-segment touch-tracking into the history we declared
 // up top — undo() will now revert only this client's writes from the undone
@@ -2933,6 +2964,7 @@ function _setupGridInstance() {
     getCurrentSheet()    { return sheet.getCurrentSheet() },
     getEditingHomeSheet() { return editingHomeSheet.value },
     onFill(src, total, { withModifier = false } = {}) {
+      if (readOnly.value) return   // viewer: drag-fill disabled
       const series = _previewSeriesKind(src)
       // Cmd/Ctrl held inverts the auto-detected mode — Google Sheets behaviour.
       const mode = withModifier ? (series ? 'copy' : 'series') : 'auto'
@@ -2957,10 +2989,19 @@ function _setupGridInstance() {
       history.push()
       isDirty.value = true
     },
+    // Viewer mode: a guest / view-only sharee can select & scroll but the
+    // in-cell editor never opens. `canWrite` resolves async (after get_sheet),
+    // so the watch below keeps the grid in sync once it lands.
+    readOnly: readOnly.value,
   })
   // Keep DOM overlays (filter chevrons) in sync with canvas scroll/resize/freeze.
   grid.onRender(() => { renderVersion.value++ })
 }
+
+// `canWrite` arrives after the first get_sheet, so the grid may have been
+// created editable; flip it to viewer the moment we learn the caller is
+// read-only (and back, e.g. if an owner regains write on reload).
+watch(readOnly, (ro) => grid?.setReadOnly?.(ro))
 
 function _setupEventListeners() {
   canvasRef.value.addEventListener('contextmenu', onCanvasContextMenu)
@@ -3045,7 +3086,7 @@ onBeforeUnmount(() => {
   // debounce window) silently drops the most recent changes — exactly the
   // "data is lost when I come back" report. The fetch uses `keepalive: true`
   // so the request survives the unmount.
-  if (isDirty.value && props.id && props.id !== 'new') {
+  if (!readOnly.value && isDirty.value && props.id && props.id !== 'new') {
     saveExisting(props.id, currentTitle.value, { keepalive: true })
   }
   window.removeEventListener('beforeunload', onBeforeUnloadGuard)
@@ -3248,11 +3289,16 @@ function _truncatedSummary(op) {
 }
 
 function _triggerAutoSave() {
+  // Read-only viewers (guests / view-only sharees) never persist. The server
+  // rejects their writes anyway; bailing here avoids surfacing a "couldn't
+  // save" chip for edits they were never allowed to make.
+  if (readOnly.value) return
   clearTimeout(_autoSaveTimer)
   _autoSaveTimer = setTimeout(_doAutoSave, 2000)
 }
 
 async function _doAutoSave() {
+  if (readOnly.value) return
   if (!isDirty.value) return
   // Bootstrap is handled by _loadInitialData's autoCreate(); calling
   // saveExisting('new') would explode with "Sheet new not found". If the
@@ -3461,6 +3507,7 @@ const { onGlobalKey } = useShortcuts({
   clipboard, clipboardHas, setMarchingAnts: (v) => grid?.setMarchingAnts(v),
   fillDown, fillRight,
   runSmartFill,
+  readOnly: () => readOnly.value,
 })
 
 // ── Clipboard ─────────────────────────────────────────────────────────────────
@@ -3480,6 +3527,7 @@ function onDocCopy(e) {
 }
 function onDocCut(e) {
   if (!_canvasActive()) return
+  if (readOnly.value) return   // viewer: cut (which clears cells) disabled
   e.preventDefault()
   const src    = grid.getSelection()
   const sn     = sheet.getCurrentSheet()
@@ -3491,6 +3539,7 @@ function onDocCut(e) {
 }
 function onDocPaste(e) {
   if (!_canvasActive()) return
+  if (readOnly.value) return   // viewer: paste disabled
   e.preventDefault()
   const destSel = grid.getSelection()
   const sn = sheet.getCurrentSheet()
