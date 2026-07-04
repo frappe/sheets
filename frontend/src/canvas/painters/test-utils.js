@@ -10,6 +10,8 @@ export function createMockCtx() {
     fillRect:    vi.fn(),
     strokeRect:  vi.fn(),
     arc:         vi.fn(),
+    arcTo:       vi.fn(),
+    roundRect:   vi.fn(),
     moveTo:      vi.fn(),
     lineTo:      vi.fn(),
     stroke:      vi.fn(),

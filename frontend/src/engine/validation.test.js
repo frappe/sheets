@@ -55,6 +55,26 @@ describe('ValidationEngine', () => {
     })
   })
 
+  describe('validate — checkbox', () => {
+    beforeEach(() => v.set('C1', { type: 'checkbox' }, 'Sheet1'))
+
+    it('passes for TRUE / FALSE, case-insensitively', () => {
+      expect(v.validate('C1', 'TRUE', 'Sheet1').valid).toBe(true)
+      expect(v.validate('C1', 'false', 'Sheet1').valid).toBe(true)
+    })
+
+    it('fails for any other value', () => {
+      const r = v.validate('C1', 'yes', 'Sheet1')
+      expect(r.valid).toBe(false)
+      expect(r.message).toMatch(/TRUE.*FALSE/)
+    })
+
+    it('shifts and round-trips like any rule', () => {
+      v.insertRow(0, 'Sheet1')
+      expect(v.get('C2', 'Sheet1')).toEqual({ type: 'checkbox' })
+    })
+  })
+
   it('passes all values when no rule exists', () => {
     expect(v.validate('Z9', 'anything', 'Sheet1').valid).toBe(true)
   })
