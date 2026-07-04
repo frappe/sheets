@@ -3582,8 +3582,14 @@ async function onDocPaste(e) {
     clipboard.paste(activeCell.value, () => {}, 'all', destSel)
     pasted = true
   } else {
+    // Prefer the HTML table when present — its text/plain twin from apps like
+    // Gameplan is newline-joined with no column delimiter, which would
+    // otherwise paste vertically. Fall back to text/plain (Excel/CSV/TSV).
+    const html = e.clipboardData?.getData('text/html')
     const text = e.clipboardData?.getData('text/plain')
-    if (text) {
+    if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
+      pasted = true
+    } else if (text) {
       clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
       pasted = true
     }

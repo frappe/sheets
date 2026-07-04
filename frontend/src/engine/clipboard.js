@@ -228,17 +228,64 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		if (!anch) return
 		const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd().split('\n')
 		const grid  = lines.map(l => l.split('\t'))
+		_pasteGrid(grid, anch, destSel, historyPush)
+	}
+
+	// Paste an HTML clipboard payload. Browsers — and apps like Gameplan,
+	// Excel-web and Google Sheets — put a real <table> on the clipboard even
+	// when the text/plain twin is just newline-joined. That plain twin has no
+	// column delimiter, so pasteFromText would drop every field onto its own
+	// row (a vertical paste); parsing the table recovers the real grid.
+	// Returns true when a table was found and pasted, false to signal the
+	// caller should fall back to text/plain.
+	function pasteFromHTML(html, anchorId, historyPush, destSel = null) {
+		const anch = parseCellId(anchorId)
+		if (!anch) return false
+		const grid = _parseHTMLTable(html)
+		if (!grid) return false
+		_pasteGrid(grid, anch, destSel, historyPush)
+		return true
+	}
+
+	// Extract the first <table> of an HTML payload into a 2-D array of cell
+	// strings. Cell whitespace is collapsed to single spaces (mirrors the copy
+	// path in _writeSystem) so stray <br>/newlines can't break the grid.
+	// colspan is honoured by padding empty cells. Returns null when there's no
+	// usable table.
+	function _parseHTMLTable(html) {
+		if (!html) return null
+		let doc
+		try { doc = new DOMParser().parseFromString(html, 'text/html') }
+		catch (_) { return null }
+		const table = doc.querySelector('table')
+		if (!table) return null
+		const grid = []
+		for (const tr of table.querySelectorAll('tr')) {
+			const row = []
+			for (const cell of tr.querySelectorAll('td, th')) {
+				const span = Math.max(1, parseInt(cell.getAttribute('colspan'), 10) || 1)
+				row.push((cell.textContent || '').replace(/\s+/g, ' ').trim())
+				for (let i = 1; i < span; i++) row.push('')
+			}
+			if (row.length) grid.push(row)
+		}
+		return grid.length ? grid : null
+	}
+
+	// Shared writer for external pastes: maps a 2-D `grid` of strings onto the
+	// sheet at `anch`, tiling across `destSel` when the selection is an exact
+	// multiple of the source. Builds the cell map first, then ships one bulk
+	// write — big external pastes (Excel/CSV) were the worst case here.
+	function _pasteGrid(grid, anch, destSel, historyPush) {
 		const srcRows = grid.length
 		const srcCols = grid.reduce((m, r) => Math.max(m, r.length), 0)
+		if (!srcRows || !srcCols) return
 
 		const tileable = destSel
 			&& !(destSel.r0 === destSel.r1 && destSel.c0 === destSel.c1)
 			&& ((destSel.r1 - destSel.r0 + 1) % srcRows === 0)
 			&& ((destSel.c1 - destSel.c0 + 1) % srcCols === 0)
 
-		// Build the cell map first, then ship one bulk write — same reason as
-		// paste() above. Big external pastes (Excel/CSV via system clipboard)
-		// were the worst case here.
 		const writes = {}
 		if (tileable) {
 			for (let r = destSel.r0; r <= destSel.r1; r++) {
@@ -270,5 +317,5 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 	function getPivotBlob() { return _data ? _pivot : null }
 	function clear() { _data = _fmts = _vals = _mode = _srcSel = _pivot = null }
 
-	return { copy, cut, paste, pasteFromText, hasData, getMode, getSourceSel, getPivotBlob, clear }
+	return { copy, cut, paste, pasteFromText, pasteFromHTML, hasData, getMode, getSourceSel, getPivotBlob, clear }
 }
