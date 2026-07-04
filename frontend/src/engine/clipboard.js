@@ -220,72 +220,75 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		return sheet.getDisplayValue(srcId)
 	}
 
+	// Parse an HTML fragment's first <table> into a 2D grid of cell strings, or
+	// null if there's no usable table. External apps (Gameplan, Google Sheets,
+	// Excel Online, web pages) put a full <table> on the `text/html` clipboard
+	// flavor — richer than their `text/plain` flavor, which some editors emit
+	// without tab delimiters (so it collapses into a single column). colspan is
+	// honored by padding blanks; rowspan is left as-is (rare, and its cell text
+	// simply lands in the top row of the span).
+	function parseHTMLTable(html) {
+		if (!html || typeof DOMParser === 'undefined') return null
+		const doc   = new DOMParser().parseFromString(html, 'text/html')
+		const table = doc.querySelector('table')
+		if (!table) return null
+		const grid = []
+		// Only the outer table's own rows/cells — a bare querySelectorAll('tr')
+		// descends into any nested <table> inside a cell (common in web-page
+		// clipboard HTML) and bleeds its rows into the outer grid. A nested
+		// table's text still lands in the parent cell via textContent, which is
+		// what we want.
+		const rows = table.querySelectorAll(
+			':scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr',
+		)
+		for (const tr of rows) {
+			const row = []
+			for (const cell of tr.querySelectorAll(':scope > th, :scope > td')) {
+				const text = (cell.textContent ?? '').replace(/\s+/g, ' ').trim()
+				row.push(text)
+				const span = parseInt(cell.getAttribute('colspan') || '1', 10)
+				for (let i = 1; i < span; i++) row.push('')
+			}
+			grid.push(row)
+		}
+		// Drop trailing all-empty rows some editors append.
+		while (grid.length && grid[grid.length - 1].every(c => c === '')) grid.pop()
+		return grid.length ? grid : null
+	}
+
+	// Paste an HTML-table grid (from an external app's `text/html` flavor).
+	// Shares the placement/tiling/bulk-write path with pasteFromText.
+	function pasteFromHTML(html, anchorId, historyPush, destSel = null) {
+		const grid = parseHTMLTable(html)
+		if (!grid) return false
+		return _pasteGrid(grid, anchorId, historyPush, destSel)
+	}
+
 	// Paste raw text (from system clipboard / external app).  Honors destSel so
 	// pasting a single token into a multi-cell selection fills the whole range.
 	function pasteFromText(text, anchorId, historyPush, destSel = null) {
 		if (!text?.trim()) return
-		const anch = parseCellId(anchorId)
-		if (!anch) return
 		const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd().split('\n')
 		const grid  = lines.map(l => l.split('\t'))
-		_pasteGrid(grid, anch, destSel, historyPush)
+		return _pasteGrid(grid, anchorId, historyPush, destSel)
 	}
 
-	// Paste an HTML clipboard payload. Browsers — and apps like Gameplan,
-	// Excel-web and Google Sheets — put a real <table> on the clipboard even
-	// when the text/plain twin is just newline-joined. That plain twin has no
-	// column delimiter, so pasteFromText would drop every field onto its own
-	// row (a vertical paste); parsing the table recovers the real grid.
-	// Returns true when a table was found and pasted, false to signal the
-	// caller should fall back to text/plain.
-	function pasteFromHTML(html, anchorId, historyPush, destSel = null) {
+	// Place a 2D grid of cell strings at the anchor (or tiled across destSel),
+	// then ship one bulk write. Shared by pasteFromText and pasteFromHTML.
+	function _pasteGrid(grid, anchorId, historyPush, destSel = null) {
 		const anch = parseCellId(anchorId)
 		if (!anch) return false
-		const grid = _parseHTMLTable(html)
-		if (!grid) return false
-		_pasteGrid(grid, anch, destSel, historyPush)
-		return true
-	}
-
-	// Extract the first <table> of an HTML payload into a 2-D array of cell
-	// strings. Cell whitespace is collapsed to single spaces (mirrors the copy
-	// path in _writeSystem) so stray <br>/newlines can't break the grid.
-	// colspan is honoured by padding empty cells. Returns null when there's no
-	// usable table.
-	function _parseHTMLTable(html) {
-		if (!html) return null
-		let doc
-		try { doc = new DOMParser().parseFromString(html, 'text/html') }
-		catch (_) { return null }
-		const table = doc.querySelector('table')
-		if (!table) return null
-		const grid = []
-		for (const tr of table.querySelectorAll('tr')) {
-			const row = []
-			for (const cell of tr.querySelectorAll('td, th')) {
-				const span = Math.max(1, parseInt(cell.getAttribute('colspan'), 10) || 1)
-				row.push((cell.textContent || '').replace(/\s+/g, ' ').trim())
-				for (let i = 1; i < span; i++) row.push('')
-			}
-			if (row.length) grid.push(row)
-		}
-		return grid.length ? grid : null
-	}
-
-	// Shared writer for external pastes: maps a 2-D `grid` of strings onto the
-	// sheet at `anch`, tiling across `destSel` when the selection is an exact
-	// multiple of the source. Builds the cell map first, then ships one bulk
-	// write — big external pastes (Excel/CSV) were the worst case here.
-	function _pasteGrid(grid, anch, destSel, historyPush) {
 		const srcRows = grid.length
 		const srcCols = grid.reduce((m, r) => Math.max(m, r.length), 0)
-		if (!srcRows || !srcCols) return
 
 		const tileable = destSel
 			&& !(destSel.r0 === destSel.r1 && destSel.c0 === destSel.c1)
 			&& ((destSel.r1 - destSel.r0 + 1) % srcRows === 0)
 			&& ((destSel.c1 - destSel.c0 + 1) % srcCols === 0)
 
+		// Build the cell map first, then ship one bulk write — same reason as
+		// paste() above. Big external pastes (Excel/CSV via system clipboard)
+		// were the worst case here.
 		const writes = {}
 		if (tileable) {
 			for (let r = destSel.r0; r <= destSel.r1; r++) {
@@ -305,6 +308,7 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		if (sheet.batchSetCells) sheet.batchSetCells(writes, sn, { replace: false })
 		else                     for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sn)
 		historyPush?.()   // post-mutate snapshot
+		return true
 	}
 
 	// Expand selection to fit pasted content (used for visual feedback).
