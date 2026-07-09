@@ -1,5 +1,6 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { call }                        from '../../utils/api.js'
+import { getSessionUser, userInitials } from '../../utils/session.js'
 import { createYDoc, hydrateYDoc }     from '../../collab/ydoc.js'
 import { bindCells }                   from '../../collab/cells-binding.js'
 import { createFrappeProvider }        from '../../collab/frappe-provider.js'
@@ -115,7 +116,7 @@ export function useCollaboration({
   currentSheet,
   getSheet,
   repopulateGrid,
-  _self        = window.frappe?.session?.user,
+  _self        = getSessionUser().user,
   _realtime    = window.frappe?.realtime,
   _callFn      = (method, args) => call(method, args),
   _watch       = watch,
@@ -327,18 +328,21 @@ export function useCollaboration({
     // Guard against `window` being undefined (tests run in node) — the
     // composable should still function with just an id.
     const w = (typeof window !== 'undefined') ? window : undefined
-    const fullName = w?.frappe?.session?.user_fullname
+    // Resolve the local user's name/image the same way the avatar does — from
+    // the www shim or Frappe's login cookies — so presence shows a real name
+    // in the suite deployment (where window.frappe is absent) instead of just
+    // the raw email. Only trust the resolved identity when it's this user.
+    const me = getSessionUser()
+    const mine = me.user && me.user === id
+    const fullName = (mine && me.fullName)
       || w?.frappe?.boot?.user_info?.[id]?.fullname
       || id
       || 'Anonymous'
-    const parts = String(fullName).split(' ').filter(Boolean)
-    const initials = ((parts[0]?.[0] || '?')
-      + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
     return {
       id,
       fullName: String(fullName),
-      initials,
-      image: w?.frappe?.boot?.user_info?.[id]?.image || '',
+      initials: userInitials(fullName === id ? '' : fullName, id),
+      image: (mine && me.image) || w?.frappe?.boot?.user_info?.[id]?.image || '',
     }
   }
 

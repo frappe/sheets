@@ -160,6 +160,7 @@
 import { ref, computed, watch } from 'vue'
 import { Badge } from 'frappe-ui'
 import { call } from '../../utils/api.js'
+import { getSessionUser, userInitials } from '../../utils/session.js'
 
 const props = defineProps({
   modelValue:  { type: Boolean, default: false },
@@ -205,15 +206,17 @@ function _flashError(err) {
 
 // ── owner ──────────────────────────────────────────────────────────────────
 
-const ownerFullName = computed(() =>
-  window.frappe?.session?.user_fullname
-  || window.frappe?.boot?.user_info?.[props.ownerId]?.fullname
-  || props.ownerId
-  || 'You'
-)
-const ownerInitials = computed(() =>
-  ownerFullName.value.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()
-)
+const ownerFullName = computed(() => {
+  // Prefer the resolved session name when the current user *is* the owner
+  // (works in both the standalone www page and the suite deployment); else
+  // fall back to any desk boot user_info, then the owner's id.
+  const me = getSessionUser()
+  if (props.ownerId && props.ownerId === me.user && me.fullName) return me.fullName
+  return window.frappe?.boot?.user_info?.[props.ownerId]?.fullname
+    || props.ownerId
+    || 'You'
+})
+const ownerInitials = computed(() => userInitials(ownerFullName.value, props.ownerId))
 
 // ── general access ─────────────────────────────────────────────────────────
 
