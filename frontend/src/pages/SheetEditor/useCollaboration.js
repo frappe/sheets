@@ -324,25 +324,18 @@ export function useCollaboration({
   }
 
   function _readUserIdentity() {
+    // This only ever describes THIS client's own presence (id === _self, the
+    // local user), so the name/image come straight from the session resolver
+    // (the www shim or Frappe's login cookies) — no need to re-check "is this
+    // me", which meant reading the session a second time and could drift.
     const id = _self
-    // Guard against `window` being undefined (tests run in node) — the
-    // composable should still function with just an id.
-    const w = (typeof window !== 'undefined') ? window : undefined
-    // Resolve the local user's name/image the same way the avatar does — from
-    // the www shim or Frappe's login cookies — so presence shows a real name
-    // in the suite deployment (where window.frappe is absent) instead of just
-    // the raw email. Only trust the resolved identity when it's this user.
     const me = getSessionUser()
-    const mine = me.user && me.user === id
-    const fullName = (mine && me.fullName)
-      || w?.frappe?.boot?.user_info?.[id]?.fullname
-      || id
-      || 'Anonymous'
+    const fullName = me.fullName || id || 'Anonymous'
     return {
       id,
       fullName: String(fullName),
-      initials: userInitials(fullName === id ? '' : fullName, id),
-      image: (mine && me.image) || w?.frappe?.boot?.user_info?.[id]?.image || '',
+      initials: userInitials(me.fullName, id),
+      image: me.image || '',
     }
   }
 
