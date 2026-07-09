@@ -73,4 +73,16 @@ describe('clipboard — pasteFromHTML (external table paste)', () => {
     expect(cb.pasteFromHTML('', 'A1', null, null)).toBe(false)
     expect(sheet._store().A1).toBeUndefined()
   })
+
+  it('measureHTMLPaste reports the table block so undo covers the whole paste', () => {
+    // Same undo-capture bug as the text path: an HTML table pasted into a
+    // single clicked cell must record every written cell, not just the anchor.
+    const html = '<table>' +
+                 '<tr><td>a</td><td>b</td><td>c</td></tr>' +
+                 '<tr><td>1</td><td>2</td><td>3</td></tr></table>'
+    expect(cb.measureHTMLPaste(html, 'A1', { r0: 0, c0: 0, r1: 0, c1: 0 }))
+      .toEqual({ r0: 0, c0: 0, r1: 1, c1: 2 })
+    // No table → null, so the editor falls through to the text measure.
+    expect(cb.measureHTMLPaste('<p>no table</p>', 'A1', null)).toBeNull()
+  })
 })

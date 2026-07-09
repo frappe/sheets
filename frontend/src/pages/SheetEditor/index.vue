@@ -3557,6 +3557,24 @@ async function onDocPaste(e) {
     return
   }
 
+  // Prefer the HTML flavor when it carries a real table — external apps
+  // (Gameplan, Google Sheets, web pages) put a structured <table> there, while
+  // their text/plain flavor can lack tab delimiters and collapse into a single
+  // column. Read both flavors up front so we can also MEASURE the paste extent
+  // before writing (see below).
+  const html = clipboard.hasData() ? null : e.clipboardData?.getData('text/html')
+  const text = clipboard.hasData() ? null : e.clipboardData?.getData('text/plain')
+
+  // For an external paste there is no internal source selection, so
+  // _pasteAffectedRects only sees the clicked cell — the output block's real
+  // size lives in the clipboard payload. Measure it (side-effect free, same
+  // grid math the write uses) and fold it into the capture rect, or undo would
+  // record only the anchor cell and leave the rest of the block behind.
+  const externalRect = clipboard.hasData()
+    ? null
+    : (clipboard.measureHTMLPaste(html, activeCell.value, destSel)
+       ?? clipboard.measureTextPaste(text, activeCell.value, destSel))
+
   // Snapshot the pre-paste state for cells + formats + validation across
   // the destination rect, plus cond-format rule count for the fallback
   // decision. The cells+formats+validation diff drives op-based undo; if
@@ -3566,6 +3584,7 @@ async function onDocPaste(e) {
   // Capture across everything the paste can touch (dest, full output block,
   // and — for a cut — the vacated source) so undo restores all of it.
   const rects      = _pasteAffectedRects(destSel)
+  if (externalRect) rects.push(externalRect)
   const before     = Object.assign({}, ...rects.map(r => _captureRange(r, sn)))
   const beforeFmt  = Object.assign({}, ...rects.map(r => _captureFormatsRange(r, sn)))
   const beforeVal  = Object.assign({}, ...rects.map(r => _captureValidationRange(r, sn)))
@@ -3577,21 +3596,11 @@ async function onDocPaste(e) {
     // history entry from out here. clipboard still does its mutations.
     clipboard.paste(activeCell.value, () => {}, 'all', destSel)
     pasted = true
-  } else {
-    // Prefer the HTML flavor when it carries a real table — external apps
-    // (Gameplan, Google Sheets, web pages) put a structured <table> there,
-    // while their text/plain flavor can lack tab delimiters and collapse into
-    // a single column. Fall back to tab/newline-delimited plain text.
-    const html = e.clipboardData?.getData('text/html')
-    if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
-      pasted = true
-    } else {
-      const text = e.clipboardData?.getData('text/plain')
-      if (text) {
-        clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
-        pasted = true
-      }
-    }
+  } else if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
+    pasted = true
+  } else if (text) {
+    clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
+    pasted = true
   }
   clipboardHas.value = clipboard.hasData()
   grid.setMarchingAnts(null)

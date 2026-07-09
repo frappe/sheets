@@ -155,3 +155,39 @@ describe('clipboard — cut clears the source but not overlapping dest cells', (
     expect(sheet.getCell('C2')).toBe('2')
   })
 })
+
+describe('clipboard — measure external paste extent (undo-capture bounds)', () => {
+  // Repro for the live bug: a multi-row text file pasted into a single clicked
+  // cell wrote every row, but undo only reverted the anchor because the editor
+  // sized its before/after capture to the clicked cell alone. The measure
+  // helpers report the true output rect so the capture covers the whole block.
+  let sheet, cb
+  beforeEach(() => { sheet = makeSheet({}); cb = createClipboard({ sheet }) })
+
+  it('measureTextPaste covers the whole block for a single-cell selection', () => {
+    const text = 'a\tb\tc\n1\t2\t3\n4\t5\t6'          // 3 rows × 3 cols
+    const rect = cb.measureTextPaste(text, 'A1', { r0: 0, c0: 0, r1: 0, c1: 0 })
+    expect(rect).toEqual({ r0: 0, c0: 0, r1: 2, c1: 2 })
+  })
+
+  it('measureTextPaste matches the cells the write actually touches', () => {
+    const text = 'a\tb\tc\n1\t2\t3\n4\t5\t6'
+    const rect = cb.measureTextPaste(text, 'C3', null)
+    cb.pasteFromText(text, 'C3', null, null)
+    // Every written cell falls inside the measured rect, and its corners are
+    // written — the capture neither under- nor over-covers.
+    expect(rect).toEqual({ r0: 2, c0: 2, r1: 4, c1: 4 })
+    expect(sheet.getCell('C3')).toBe('a')            // top-left
+    expect(sheet.getCell('E5')).toBe('6')            // bottom-right
+  })
+
+  it('measureTextPaste honours a tiled destination (rect === destSel)', () => {
+    const rect = cb.measureTextPaste('x', 'B1', { r0: 0, c0: 1, r1: 0, c1: 3 })
+    expect(rect).toEqual({ r0: 0, c0: 1, r1: 0, c1: 3 })
+  })
+
+  it('measureTextPaste returns null for empty/blank text', () => {
+    expect(cb.measureTextPaste('', 'A1', null)).toBeNull()
+    expect(cb.measureTextPaste('   ', 'A1', null)).toBeNull()
+  })
+})
