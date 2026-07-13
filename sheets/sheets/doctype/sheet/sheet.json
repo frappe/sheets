@@ -8,7 +8,10 @@
   "title",
   "sheets_data",
   "head_seq",
-  "head_snapshot"
+  "head_snapshot",
+  "trashed",
+  "trashed_on",
+  "trashed_by"
  ],
  "fields": [
   {
@@ -35,6 +38,29 @@
    "fieldtype": "Link",
    "options": "Sheet Snapshot",
    "label": "Latest snapshot"
+  },
+  {
+   "fieldname": "trashed",
+   "fieldtype": "Check",
+   "label": "Trashed",
+   "default": "0",
+   "in_standard_filter": 1,
+   "description": "Soft-delete flag. Trashed sheets are hidden from the app and purged after the retention window."
+  },
+  {
+   "fieldname": "trashed_on",
+   "fieldtype": "Datetime",
+   "label": "Trashed On",
+   "read_only": 1,
+   "depends_on": "trashed"
+  },
+  {
+   "fieldname": "trashed_by",
+   "fieldtype": "Link",
+   "options": "User",
+   "label": "Trashed By",
+   "read_only": 1,
+   "depends_on": "trashed"
   }
  ],
  "links": [],

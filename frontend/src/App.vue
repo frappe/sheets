@@ -17,30 +17,38 @@
     </div>
   </div>
 
-  <Home v-if="!currentId" @open="openSheet" @new="newSheet" />
-  <SheetEditor v-else :id="currentId" @close="goHome" @saved="onSaved" />
+  <SheetEditor v-if="currentId" :id="currentId" @close="goHome" @saved="onSaved" />
+  <Trash v-else-if="view === 'trash'" @home="goHome" />
+  <Home v-else @open="openSheet" @new="newSheet" @trash="openTrash" />
   <Dialogs />
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import Home        from './pages/Home.vue'
+import Trash       from './pages/Trash.vue'
 import SheetEditor from './pages/SheetEditor/index.vue'
 
+// Two independent axes of navigation: `currentId` (an open sheet, via ?id=)
+// takes precedence; otherwise `view` (?view=trash) picks the home surface.
 const currentId = ref(null)
+const view      = ref('home')
 
 onMounted(() => {
-  const id = new URLSearchParams(location.search).get('id')
-  if (id) currentId.value = id
-
-  window.addEventListener('popstate', () => {
-    currentId.value = new URLSearchParams(location.search).get('id') ?? null
-  })
+  syncFromUrl()
+  window.addEventListener('popstate', syncFromUrl)
 })
 
-function openSheet(id) { currentId.value = id;   history.pushState({}, '', `?id=${id}`) }
-function newSheet()     { currentId.value = 'new'; history.pushState({}, '', '?id=new') }
-function goHome()       { currentId.value = null;  history.pushState({}, '', location.pathname) }
+function syncFromUrl() {
+  const params = new URLSearchParams(location.search)
+  currentId.value = params.get('id') ?? null
+  view.value      = params.get('view') === 'trash' ? 'trash' : 'home'
+}
+
+function openSheet(id) { currentId.value = id;   view.value = 'home';  history.pushState({}, '', `?id=${id}`) }
+function newSheet()     { currentId.value = 'new'; view.value = 'home';  history.pushState({}, '', '?id=new') }
+function openTrash()    { currentId.value = null;  view.value = 'trash'; history.pushState({}, '', '?view=trash') }
+function goHome()       { currentId.value = null;  view.value = 'home';  history.pushState({}, '', location.pathname) }
 function onSaved(name)  { currentId.value = name;  history.replaceState({}, '', `?id=${name}`) }
 </script>
 
