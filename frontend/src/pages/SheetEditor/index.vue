@@ -432,6 +432,15 @@
         @cancel="onSplitCancel"
       />
 
+      <!-- Outline around the active filter's range so its extent is visible.
+           pointer-events:none keeps clicks reaching the canvas underneath. -->
+      <div
+        v-if="filterHighlightStyle"
+        class="sn-filter-range"
+        :style="filterHighlightStyle"
+        aria-hidden="true"
+      />
+
       <!-- Filter chevrons on row 0 (the user's header row of data) -->
       <div v-if="showSortFilter" class="sn-filter-overlay">
         <button
@@ -1090,6 +1099,7 @@
 <script setup>
 import { h, ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { createGrid }          from '../../canvas/index.js'
+import { COL_HEADER_H, ROW_HEADER_W } from '../../canvas/constants.js'
 import { colLabel, parseCellId, cellId } from '../../utils/cells.js'
 import { call } from '../../utils/api.js'
 import { getSessionUser, userInitials } from '../../utils/session.js'
@@ -2511,6 +2521,34 @@ const filterPanelStyle = computed(() => {
   return {
     top:  (rowRect.y + rowRect.height + 2) + 'px',
     left: clampFilterLeft(colRect.x + colRect.width - BTN - 3, wrapW) + 'px',
+  }
+})
+
+// Outline drawn around the active filter's rectangle so its extent is visible
+// (Google-Sheets-style). Mirrors the pivot highlight: bounding box from the
+// range's top-left / bottom-right cell rects, clamped to the header strips so
+// it never paints over the row-number gutter or column-header row when the
+// range is scrolled partly out of view.
+const filterHighlightStyle = computed(() => {
+  renderVersion.value
+  if (!showSortFilter.value || !grid || !filterRange.value) return null
+  const { r0, c0, r1, c1 } = filterRange.value
+  const tl = grid.getCellRect?.(r0, c0)
+  const br = grid.getCellRect?.(r1, c1)
+  if (!tl || !br) return null
+  const zoom    = grid.getZoom?.() ?? 1
+  const headerY = COL_HEADER_H * zoom
+  const headerX = ROW_HEADER_W * zoom
+  const right   = br.x + br.width
+  const bottom  = br.y + br.height
+  if (bottom <= headerY || right <= headerX) return null
+  const top  = Math.max(tl.y, headerY)
+  const left = Math.max(tl.x, headerX)
+  return {
+    top:    top  + 'px',
+    left:   left + 'px',
+    width:  (right  - left) + 'px',
+    height: (bottom - top)  + 'px',
   }
 })
 
@@ -4240,13 +4278,18 @@ function _detectContiguousBlock(r, c) {
   return { r0, c0, r1, c1 }
 }
 
-// Create a filter on the user's current selection.  Single-cell selection
-// auto-expands to the contiguous data block (or refuses if the cell is empty).
+// Create a filter on the user's current selection.  A selection that spans no
+// data rows — a single cell, or a lone header row like A1:E1 — auto-expands to
+// the contiguous data block around its top-left anchor (or refuses if that
+// anchor is empty). Without this, toggling the filter on just the header row
+// would produce a header-only range (r1 === r0): chevrons appear, but the
+// value list scans zero data rows and comes up empty. A genuine multi-row
+// block is taken verbatim.
 function _createFilterOnSelection() {
   if (!grid) return
   const sel = grid.getSelection()
-  const isSingle = sel.r0 === sel.r1 && sel.c0 === sel.c1
-  const range = isSingle
+  const noDataRows = sel.r0 === sel.r1
+  const range = noDataRows
     ? (_detectContiguousBlock(sel.r0, sel.c0) || { r0: sel.r0, c0: sel.c0, r1: sel.r0, c1: sel.c0 })
     : { r0: sel.r0, c0: sel.c0, r1: sel.r1, c1: sel.c1 }
   sortFilter.setRange(range, sheet.getCurrentSheet())
@@ -5152,6 +5195,15 @@ function toggleShowFormulas() {
    reaching the canvas underneath. */
 .sn-pivot-highlight {
   position: absolute; z-index: 15; pointer-events: none;
+  border: 1.5px solid var(--ink-gray-8);
+  border-radius: 2px;
+}
+
+/* Filter range outline — same neutral chrome as the pivot highlight, drawn
+   around the active filter's rectangle so its extent is visible. pointer-events
+   stays off so the chevron buttons and canvas underneath keep receiving clicks. */
+.sn-filter-range {
+  position: absolute; z-index: 14; pointer-events: none;
   border: 1.5px solid var(--ink-gray-8);
   border-radius: 2px;
 }
