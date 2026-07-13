@@ -385,6 +385,10 @@ def delete_sheet_permanent(name: str) -> str:
 	# Irreversible "delete forever" from the trash. Owner-only, same as trashing.
 	# The cascade lives in sheets.trash so it stays in lockstep with the purge.
 	frappe.has_permission("Sheet", doc=name, ptype="delete", throw=True)
+	# Only ever fire from the trash flow: a direct call on a live sheet must not
+	# skip the recovery window and destroy it in one shot.
+	if not frappe.db.get_value("Sheet", name, "trashed"):
+		frappe.throw("Only sheets in the trash can be permanently deleted.")
 	from sheets.trash import hard_delete_sheet
 
 	hard_delete_sheet(name)
