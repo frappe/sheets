@@ -312,6 +312,10 @@ describe('applyCustomFmt — Excel-style patterns', () => {
     expect(f(-0.4, '0')).toBe('0')
     expect(f(-0.001, '0.00')).toBe('0.00')
   })
+  it('places the sign before a literal prefix', () => {
+    expect(f(-1234.5, '"$"#,##0.00')).toBe('-$1,234.50')
+    expect(f(-50, '"$"0')).toBe('-$50')
+  })
   it('non-numeric value passes through untouched', () => {
     expect(f('hello', '0.00')).toBe('hello')
   })

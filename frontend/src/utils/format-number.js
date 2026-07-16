@@ -220,8 +220,12 @@ export function applyCustomFmt(value, pattern) {
   if (isNaN(n)) return value == null ? '' : String(value)
   const { prefix, numSpec, suffix, percent } = _parseCustomPattern(pattern)
   if (!numSpec) return prefix + suffix
-  const body = _renderNumSpec(n * Math.pow(100, percent), numSpec)
-  return prefix + body + suffix
+  const scaled = n * Math.pow(100, percent)
+  const body = _renderNumSpec(scaled, numSpec)
+  // Sign sits before any literal prefix (Excel: -$1,234.50, not $-1,234.50)
+  // and is dropped when the value rounded to zero (avoid "-0").
+  const sign = scaled < 0 && /[1-9]/.test(body) ? '-' : ''
+  return sign + prefix + body + suffix
 }
 
 // Split a pattern into its literal prefix/suffix and the single numeric run,
@@ -256,7 +260,6 @@ function _parseCustomPattern(pattern) {
 // Render a number against a numeric run like `#,##0.00`: honour min integer
 // digits ('0'), optional digits ('#'), thousands grouping, and min/max decimals.
 function _renderNumSpec(n, spec) {
-  const neg = n < 0
   n = Math.abs(n)
   const dot = spec.indexOf('.')
   const intSpec  = dot === -1 ? spec : spec.slice(0, dot)
@@ -273,8 +276,5 @@ function _renderNumSpec(n, spec) {
   else if (ip === '0' && minInt === 0) ip = ''                          // `#.##` on 0.5 → ".5"
   if (grouping) ip = ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 
-  const out = fp.length ? `${ip}.${fp}` : ip
-  // Suppress the sign when the value rounded to zero, so -0.4 with `0` shows
-  // "0", not "-0". `out` has no significant digit iff it's all zeros/separators.
-  return (neg && /[1-9]/.test(out) ? '-' : '') + out
+  return fp.length ? `${ip}.${fp}` : ip
 }
