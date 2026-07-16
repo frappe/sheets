@@ -35,6 +35,7 @@ export const AC_FUNS = {
   TIME:'(hour, minute, second)', TODAY:'()', TRIM:'(text)', TRUE:'()',
   UPPER:'(text)', VALUE:'(text)',
   VLOOKUP:'(value, table, col_index, [range_lookup])',
+  XLOOKUP:'(lookup, lookup_array, return_array, [if_not_found], [match_mode])',
   WEEKDAY:'(date, [return_type])', YEAR:'(date)',
 }
 
@@ -55,4 +56,55 @@ export function parseAcToken(value, cursor) {
   if (!m) return null
   const tok = m[1] || m[2]
   return { tok, tokStart: cursor - tok.length }
+}
+
+/**
+ * Given a formula and caret, find the innermost function call the caret sits
+ * inside and which argument is being typed. Used to show parameter help once
+ * the user has passed the opening paren (where {@link parseAcToken} stops).
+ * Respects string literals and nested calls.
+ * @returns {{ fn: string, argIndex: number } | null}
+ */
+export function parseSignatureContext(value, cursor) {
+  if (!value || !value.startsWith('=')) return null
+  const s = value.slice(0, cursor)
+  const stack = []
+  let inStr = false
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (inStr) { if (ch === '"') inStr = false; continue }
+    if (ch === '"') inStr = true
+    else if (ch === '(') {
+      const name = s.slice(0, i).match(/([A-Za-z][A-Za-z0-9_]*)$/)
+      stack.push(name ? { fn: name[1].toUpperCase(), argIndex: 0 } : null)
+    }
+    else if (ch === ')') stack.pop()
+    else if (ch === ',' && stack.length && stack[stack.length - 1]) stack[stack.length - 1].argIndex++
+  }
+  for (let i = stack.length - 1; i >= 0; i--) {
+    if (stack[i] && AC_FUNS[stack[i].fn]) return stack[i]
+  }
+  return null
+}
+
+/**
+ * Split a function's signature into its parameter names and mark which one is
+ * active for the given argument index. The trailing variadic param (`...`)
+ * stays active for any overflow index.
+ * @returns {{ params: string[], active: number } | null}
+ */
+export function describeSignature(fn, argIndex) {
+  const sig = AC_FUNS[fn]
+  if (!sig) return null
+  const inner = sig.slice(1, -1).trim()          // strip the wrapping parens
+  if (!inner) return { params: [], active: -1 }
+  const params = inner.split(',').map(p => p.trim())
+  // A trailing `...` marks the previous param as repeating, so overflow args
+  // (and the `...` token itself) keep that repeating param highlighted.
+  const repeat = params[params.length - 1] === '...' ? params.length - 2 : -1
+  let active
+  if (repeat >= 0 && argIndex >= repeat) active = repeat
+  else if (argIndex < params.length) active = argIndex
+  else active = -1
+  return { params, active }
 }

@@ -26,9 +26,16 @@ function _checkNumOp(n, op, min, max) {
 // Shared by the engine's per-cell validate() and the canvas painter (which
 // needs to know validity to draw the invalid marker) so there's one source
 // of truth for what "valid" means. No state, no sheet lookup.
+//
+// `severity` echoes the rule's setting: 'reject' (default) blocks the edit,
+// 'warn' lets it through but flags the cell. Callers gate on it.
 export function checkRule(rule, value) {
   if (!rule) return { valid: true }
+  const res = _evalRule(rule, value)
+  return { ...res, severity: res.valid ? undefined : (rule.severity || 'reject') }
+}
 
+function _evalRule(rule, value) {
   if (rule.type === 'list') {
     const opts = rule.options || []
     const ok = opts.includes(String(value))

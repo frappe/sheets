@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createValidationEngine } from './validation.js'
+import { createValidationEngine, checkRule } from './validation.js'
 
 describe('ValidationEngine', () => {
   let v
@@ -92,5 +92,22 @@ describe('ValidationEngine', () => {
     const v2 = createValidationEngine()
     v2.restore(snap)
     expect(v2.get('A1', 'Sheet1')).toEqual({ type: 'list', options: ['a', 'b'] })
+  })
+})
+
+describe('checkRule — severity', () => {
+  const rule = { type: 'number', operator: 'between', min: 1, max: 10 }
+
+  it('defaults failing rules to reject', () => {
+    expect(checkRule(rule, 50).severity).toBe('reject')
+  })
+  it('reports warn when the rule opts into it', () => {
+    const warnRule = { ...rule, severity: 'warn' }
+    const res = checkRule(warnRule, 50)
+    expect(res.valid).toBe(false)
+    expect(res.severity).toBe('warn')
+  })
+  it('leaves severity undefined for a passing value', () => {
+    expect(checkRule({ ...rule, severity: 'warn' }, 5).severity).toBeUndefined()
   })
 })

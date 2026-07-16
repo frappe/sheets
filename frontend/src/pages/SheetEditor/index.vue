@@ -918,6 +918,15 @@
             label="Error message (optional)"
             placeholder="This value is not allowed"
           />
+
+          <!-- On invalid: block the edit, or allow it with a warning -->
+          <FormControl v-if="validationDialog.type !== 'checkbox'"
+            type="select" label="When the value is invalid" v-model="validationDialog.severity"
+            :options="[
+              { label: 'Reject the input',        value: 'reject' },
+              { label: 'Allow, but show a warning', value: 'warn' },
+            ]"
+          />
         </div>
       </template>
       <template #actions>
@@ -1558,6 +1567,7 @@ const validationDialog = reactive({
   val2:     '',
   listRaw:  '',
   message:  '',
+  severity: 'reject',   // 'reject' blocks the edit; 'warn' allows it but flags the cell
 })
 
 // ── Conditional format dialog state ───────────────────────────────────────────
@@ -2961,7 +2971,9 @@ function _setupGridInstance() {
       const trimmed = String(value ?? '').trim()
       if (trimmed !== '') {
         const v = validation.validate(id, value, writeSheet)
-        if (!v.valid) {
+        // 'warn' rules let the value through but surface a transient notice;
+        // 'reject' (default) blocks the edit and repaints the pre-edit value.
+        if (!v.valid && v.severity !== 'warn') {
           const msg = v.message || 'Value rejected by data validation rule'
           saveError.value = msg
           setTimeout(() => { if (saveError.value === msg) saveError.value = '' }, 3500)
@@ -2972,6 +2984,11 @@ function _setupGridInstance() {
           editingHomeCell.value  = null
           syncFlags()
           return
+        }
+        if (!v.valid && v.severity === 'warn') {
+          const msg = v.message || 'Value flagged by data validation rule'
+          saveError.value = msg
+          setTimeout(() => { if (saveError.value === msg) saveError.value = '' }, 3500)
         }
       }
 
@@ -3985,6 +4002,7 @@ function openValidationDialog() {
   validationDialog.val2     = String(e?.max ?? '')
   validationDialog.listRaw  = (e?.options || []).join(', ')
   validationDialog.message  = e?.message  || ''
+  validationDialog.severity = e?.severity || 'reject'
   validationDialog.open     = true
 }
 
@@ -3992,19 +4010,23 @@ function confirmValidation() {
   const ids = selectionIds()
   const sn  = sheet.getCurrentSheet()
   const msg = validationDialog.message.trim() || undefined
+  // 'warn' only differs from the default when the value fails, and a checkbox
+  // is TRUE/FALSE-only where "allow anyway" makes no sense — so scope it out.
+  const severity = validationDialog.type === 'checkbox' ? undefined
+    : (validationDialog.severity === 'warn' ? 'warn' : undefined)
   let rule
   if (validationDialog.type === 'checkbox') {
     rule = { type: 'checkbox', message: msg }
   } else if (validationDialog.type === 'list') {
     const options = validationDialog.listRaw.split(',').map(s => s.trim()).filter(Boolean)
-    rule = { type: 'list', options, message: msg }
+    rule = { type: 'list', options, message: msg, severity }
   } else {
     const op  = validationDialog.operator
     const v1  = parseFloat(validationDialog.val1)
     const v2  = parseFloat(validationDialog.val2)
     const min = isNaN(v1) ? undefined : v1
     const max = ['between', 'not_between'].includes(op) && !isNaN(v2) ? v2 : undefined
-    rule = { type: validationDialog.type, operator: op, min, max, message: msg }
+    rule = { type: validationDialog.type, operator: op, min, max, message: msg, severity }
   }
   for (const id of ids) validation.set(id, rule, sn)
 

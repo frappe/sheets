@@ -3,7 +3,7 @@ import { createRenderer } from './renderer.js'
 import { createOverlay }  from './overlay.js'
 import { TOTAL_ROWS, TOTAL_COLS, DEFAULT_TOTAL_ROWS, DEFAULT_TOTAL_COLS, DEFAULT_ROW_H, ROW_HEADER_W, COL_HEADER_H, setTotalRows, setTotalCols } from './constants.js'
 import { cellId, colLabel, parseCellId } from '../utils/cells.js'
-import { AC_FUNS, AC_FUN_KEYS, parseAcToken } from '../utils/formula-ac.js'
+import { AC_FUNS, AC_FUN_KEYS, parseAcToken, parseSignatureContext, describeSignature } from '../utils/formula-ac.js'
 import { isWrapText } from '../utils/text-wrap.js'
 import { CHIP, chipMetrics } from './chip-geometry.js'
 import { checkboxRect } from './checkbox-geometry.js'
@@ -298,7 +298,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   function _acUpdate(value, cursor) {
     if (!_acEl) return
     const result = parseAcToken(value, cursor)
-    if (!result) { _acHide(); return }
+    // No name being typed — fall back to parameter help if the caret is inside
+    // a known function's parens. Leaves _acItems empty so key nav ignores it.
+    if (!result) { _acShowSignature(value, cursor); return }
     const up     = result.tok.toUpperCase()
     const fns    = AC_FUN_KEYS.filter(n => n.startsWith(up)).slice(0, 6)
     const sheets = (getSheetNames?.() || [])
@@ -352,6 +354,27 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if (_acEl) _acEl.style.display = 'none'
   }
 
+  // Non-selectable parameter-help row: shows FN(a, b, c) with the argument the
+  // caret is on bolded. _acItems stays empty so Up/Down/Enter/Tab don't capture.
+  function _acShowSignature(value, cursor) {
+    const ctx = parseSignatureContext(value, cursor)
+    const desc = ctx && describeSignature(ctx.fn, ctx.argIndex)
+    if (!desc) { _acHide(); return }
+    _acItems = []; _acIdx = 0
+    const params = desc.params
+      .map((p, i) => i === desc.active ? `<b style="color:#171717;">${p}</b>` : p)
+      .join(', ')
+    _acEl.innerHTML =
+      `<div style="padding:6px 12px;white-space:nowrap;color:#7c7c7c;">` +
+      `<span style="font-weight:600;color:#171717;">${ctx.fn}</span>(${params})</div>`
+    const ox = parseFloat(overlay.el.style.left)   || 0
+    const oy = parseFloat(overlay.el.style.top)    || 0
+    const oh = parseFloat(overlay.el.style.height) || 24
+    _acEl.style.left    = ox + 'px'
+    _acEl.style.top     = (oy + oh + 2) + 'px'
+    _acEl.style.display = 'block'
+  }
+
   // item: { name, kind: 'fn' | 'sheet' }
   function _acCommit(item) {
     const input  = overlay.el
@@ -365,6 +388,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       const pos    = tokStart + item.name.length + 1
       input.setSelectionRange(pos, pos)
       onInput?.(cellId(sel.r, sel.c), newVal)
+      input.focus()
+      // Accepting a function inserts its '(' — surface its parameter help
+      // immediately instead of leaving the user with a bare, empty popup.
+      _acUpdate(newVal, pos)
+      return
     }
     _acHide()
     input.focus()
