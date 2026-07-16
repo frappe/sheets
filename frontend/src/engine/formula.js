@@ -704,13 +704,17 @@ const FUNCTIONS = {
 		if (Array.isArray(lookup)) lookup = Array.isArray(lookup[0]) ? lookup[0][0] : lookup[0]
 		const keys = flatten([lookupArr]), vals = flatten([returnArr])
 		const mm = matchMode !== undefined ? toNum(matchMode) : 0
+		// Approximate match only makes sense for a numeric lookup — otherwise
+		// Number('cherry')→NaN (and toNum→0) would spuriously match numeric keys.
+		// A non-numeric lookup falls back to exact-only, returning if_not_found.
+		const target = Number(lookup)
+		const canApprox = mm !== 0 && lookup !== '' && lookup != null && !isNaN(target)
 		let idx = -1, bestNum = null
 		for (let i = 0; i < keys.length; i++) {
 			if (looseMatch(keys[i], lookup)) { idx = i; break }
-			if (mm === 0) continue
+			if (!canApprox) continue
 			const n = Number(keys[i])
 			if (isNaN(n) || keys[i] === '') continue
-			const target = toNum(lookup)
 			// mm=1 wants the smallest key >= target; mm=-1 the largest key <= target.
 			if (mm === 1  && n > target && (bestNum === null || n < bestNum)) { bestNum = n; idx = i }
 			if (mm === -1 && n < target && (bestNum === null || n > bestNum)) { bestNum = n; idx = i }

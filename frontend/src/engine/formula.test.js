@@ -279,6 +279,11 @@ describe('lookup functions', () => {
     const cells = { A1: 'apple', A2: 'banana', B1: 1, B2: 2 }
     expect(evalExpr('=XLOOKUP("cherry",A1:A2,B1:B2)', { cells })).toBe('#N/A')
   })
+  it('XLOOKUP approximate mode ignores a non-numeric lookup (no toNum(0) match)', () => {
+    const cells = { A1: 10, A2: 20, A3: 30, B1: 'low', B2: 'mid', B3: 'hi' }
+    expect(evalExpr('=XLOOKUP("cherry",A1:A3,B1:B3,"none",1)', { cells })).toBe('none')
+    expect(evalExpr('=XLOOKUP("cherry",A1:A3,B1:B3,"none",-1)', { cells })).toBe('none')
+  })
   it('MATCH exact',      () => {
     const cells = { A1: 'a', A2: 'b', A3: 'c' }
     expect(evalExpr('=MATCH("b",A1:A3,0)', { cells })).toBe(2)
