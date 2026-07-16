@@ -934,6 +934,34 @@
       </template>
     </Dialog>
 
+    <!-- Custom number-format dialog -->
+    <Dialog v-model="customFormatDialog.open" :options="{ title: 'Custom number format', size: 'sm' }">
+      <template #body-content>
+        <div class="sn-form-stack">
+          <FormControl
+            v-model="customFormatDialog.pattern"
+            label="Format code"
+            placeholder="#,##0.00"
+            @keydown.enter="confirmCustomFormat"
+          />
+          <div class="text-sm text-ink-gray-6">
+            Preview: <span class="font-medium text-ink-gray-9">{{ customFormatPreview || '—' }}</span>
+          </div>
+          <div class="text-xs text-ink-gray-5 leading-relaxed">
+            <code>0</code> padded digit · <code>#</code> optional digit · <code>,</code> thousands ·
+            <code>.</code> decimal · <code>%</code> percent · <code>"text"</code> literal.
+            e.g. <code>#,##0.00</code>, <code>0.0%</code>, <code>"$"#,##0</code>
+          </div>
+        </div>
+      </template>
+      <template #actions>
+        <div class="flex flex-row-reverse gap-2">
+          <Button variant="solid" @click="confirmCustomFormat">Apply</Button>
+          <Button @click="customFormatDialog.open = false">Cancel</Button>
+        </div>
+      </template>
+    </Dialog>
+
     <!-- Keyboard shortcut help (?) — uses Frappe UI's KeyboardShortcut for the
          key chips so modifiers render as proper Mac glyphs and look native. -->
     <Dialog v-model="showShortcutsHelp" :options="{ title: 'Keyboard shortcuts', size: 'xl' }">
@@ -2107,6 +2135,30 @@ const _FORMAT_LABELS = (() => {
   return m
 })()
 
+// Custom number-format dialog. `pattern` is a raw Excel-style code; it's
+// stored as `custom:<pattern>` so the display path routes it to applyCustomFmt.
+const customFormatDialog = reactive({ open: false, pattern: '' })
+
+function openCustomFormatDialog() {
+  const cur = parseNumberFmt(activeNumberFormat.value)
+  customFormatDialog.pattern = cur.type === 'custom' ? cur.pattern : '#,##0.00'
+  customFormatDialog.open = true
+}
+
+// Live preview against a representative value so the user sees the effect
+// before applying. Falls back to empty on a pattern that throws.
+const customFormatPreview = computed(() => {
+  const p = customFormatDialog.pattern.trim()
+  if (!p) return ''
+  try { return applyNumberFmt(1234.567, 'custom:' + p) } catch { return '' }
+})
+
+function confirmCustomFormat() {
+  const p = customFormatDialog.pattern.trim()
+  if (p) onNumberFormatChange('custom:' + p)
+  customFormatDialog.open = false
+}
+
 const numberFormatLabel = computed(() => {
   const cur = activeNumberFormat.value
   if (_FORMAT_LABELS.has(cur)) return _FORMAT_LABELS.get(cur)
@@ -2121,15 +2173,18 @@ const numberFormatLabel = computed(() => {
   return type[0].toUpperCase() + type.slice(1)
 })
 
-const numberFormatDropdownOptions = computed(() =>
-  NUMBER_FORMAT_GROUPS.map(g => ({
+const numberFormatDropdownOptions = computed(() => [
+  ...NUMBER_FORMAT_GROUPS.map(g => ({
     group: g.group,
     items: g.items.map(it => ({
       label: it.label,
       onClick: () => onNumberFormatChange(activeNumberFormat.value === it.value ? '' : it.value),
     })),
-  }))
-)
+  })),
+  { group: 'Custom', items: [
+    { label: 'Custom format…', onClick: () => openCustomFormatDialog() },
+  ]},
+])
 
 // Active currency code (for the $-button symbol). Defaults to $ when the cell
 // isn't a currency at all, so the button always says *something* clickable.

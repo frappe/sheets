@@ -19,7 +19,11 @@
 
 export function parseNumberFmt(fmt) {
   if (!fmt) return { type: '', variant: '', decimals: null }
-  const parts = String(fmt).split(':')
+  // Custom patterns carry a raw Excel-style string that may itself contain ':'
+  // (e.g. a time mask), so they're kept whole rather than split on ':'.
+  const s = String(fmt)
+  if (s.startsWith('custom:')) return { type: 'custom', pattern: s.slice(7), variant: '', decimals: null }
+  const parts = s.split(':')
   const type = parts[0]
   let variant = ''
   let decimals = null
@@ -159,6 +163,7 @@ const DATE_LIKE = new Set(['date', 'time', 'datetime'])
 
 export function applyNumberFmt(value, format) {
   if (!format) return value
+  if (String(format).startsWith('custom:')) return applyCustomFmt(value, String(format).slice(7))
   const { type, variant, decimals } = parseNumberFmt(format)
   // Text format leaves the value untouched (no numeric coercion at display).
   // Cells flagged 'text' should also be treated as text in formulas; that's
@@ -198,4 +203,76 @@ export function applyNumberFmt(value, format) {
     return `${datePart}, ${timePart}`
   }
   return value
+}
+
+// ─── Custom Excel-style number patterns ─────────────────────────────────────
+//
+// Numeric subset of Excel's format codes — covers the common cases without
+// pulling in the full date-token grammar (dates keep their own format types):
+//   0   digit, zero-padded              #   digit, no padding
+//   .   decimal point                   ,   thousands grouping
+//   %   scale by 100 and show a percent  "text" / \c   literal passthrough
+// A pattern has one numeric run; anything before/after it is emitted verbatim,
+// so `"$"#,##0.00`, `0.0%`, `#,##0 "kg"` all work. Negatives get a leading '-'
+// (Excel's `positive;negative` sections are a later follow-up).
+export function applyCustomFmt(value, pattern) {
+  const n = parseFloat(value)
+  if (isNaN(n)) return value == null ? '' : String(value)
+  const { prefix, numSpec, suffix, percent } = _parseCustomPattern(pattern)
+  if (!numSpec) return prefix + suffix
+  const body = _renderNumSpec(n * Math.pow(100, percent), numSpec)
+  return prefix + body + suffix
+}
+
+// Split a pattern into its literal prefix/suffix and the single numeric run,
+// counting '%' signs (each scales the value by 100). Quotes and `\` escape
+// literals so a stray '0' or '#' inside text isn't treated as a placeholder.
+function _parseCustomPattern(pattern) {
+  let prefix = '', numSpec = '', suffix = '', percent = 0
+  let state = 'pre'   // pre → num → post
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]
+    let lit
+    if (ch === '"') {
+      let s = ''; i++
+      while (i < pattern.length && pattern[i] !== '"') s += pattern[i++]
+      lit = s
+    } else if (ch === '\\') {
+      lit = pattern[i + 1] ?? ''; i++
+    } else if ('0#,.'.includes(ch) && state !== 'post') {
+      state = 'num'; numSpec += ch; continue
+    } else if (ch === '%') {
+      percent++; lit = '%'
+    } else {
+      lit = ch
+    }
+    if (state === 'num') state = 'post'
+    if (state === 'pre') prefix += lit
+    else suffix += lit
+  }
+  return { prefix, numSpec, suffix, percent }
+}
+
+// Render a number against a numeric run like `#,##0.00`: honour min integer
+// digits ('0'), optional digits ('#'), thousands grouping, and min/max decimals.
+function _renderNumSpec(n, spec) {
+  const neg = n < 0
+  n = Math.abs(n)
+  const dot = spec.indexOf('.')
+  const intSpec  = dot === -1 ? spec : spec.slice(0, dot)
+  const fracSpec = dot === -1 ? ''   : spec.slice(dot + 1)
+  const grouping = intSpec.includes(',')
+  const minInt   = (intSpec.match(/0/g) || []).length
+  const minFrac  = (fracSpec.match(/0/g) || []).length
+  const maxFrac  = (fracSpec.match(/[0#]/g) || []).length
+
+  let [ip, fp = ''] = n.toFixed(maxFrac).split('.')
+  while (fp.length > minFrac && fp.endsWith('0')) fp = fp.slice(0, -1)  // drop optional trailing zeros
+  if (fp.length < minFrac) fp = fp.padEnd(minFrac, '0')
+  if (ip.length < minInt) ip = ip.padStart(minInt, '0')
+  else if (ip === '0' && minInt === 0) ip = ''                          // `#.##` on 0.5 → ".5"
+  if (grouping) ip = ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+  const out = fp.length ? `${ip}.${fp}` : ip
+  return (neg && out ? '-' : '') + out
 }

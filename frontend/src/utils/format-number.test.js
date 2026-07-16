@@ -268,3 +268,50 @@ describe('applyNumberFmt — number variants', () => {
     expect(applyNumberFmt(1234, 'number:0')).toMatch(/\d/)
   })
 })
+
+describe('applyCustomFmt — Excel-style patterns', () => {
+  const f = (v, p) => applyNumberFmt(v, 'custom:' + p)
+
+  it('pads integer digits with 0', () => {
+    expect(f(42, '000')).toBe('042')
+  })
+  it('# does not pad', () => {
+    expect(f(42, '#')).toBe('42')
+  })
+  it('thousands grouping', () => {
+    expect(f(1234567, '#,##0')).toBe('1,234,567')
+  })
+  it('fixed decimals with rounding', () => {
+    expect(f(3.14159, '0.00')).toBe('3.14')
+    expect(f(2.5, '0')).toBe('3')
+  })
+  it('optional decimals trim trailing zeros', () => {
+    expect(f(3.5, '0.##')).toBe('3.5')
+    expect(f(3, '0.##')).toBe('3')
+  })
+  it('min decimals pad', () => {
+    expect(f(3.5, '0.00')).toBe('3.50')
+  })
+  it('leading digit dropped when no integer placeholder', () => {
+    expect(f(0.5, '#.##')).toBe('.5')
+  })
+  it('percent scales by 100 and appends %', () => {
+    expect(f(0.1234, '0.0%')).toBe('12.3%')
+  })
+  it('literal prefix/suffix passthrough', () => {
+    expect(f(1234.5, '"$"#,##0.00')).toBe('$1,234.50')
+    expect(f(12, '#,##0 "kg"')).toBe('12 kg')
+  })
+  it('escaped literal char', () => {
+    expect(f(5, '0\\%')).toBe('5%')   // backslash-escaped % is literal, no scaling
+  })
+  it('negative gets a leading minus', () => {
+    expect(f(-1234.5, '#,##0.00')).toBe('-1,234.50')
+  })
+  it('non-numeric value passes through untouched', () => {
+    expect(f('hello', '0.00')).toBe('hello')
+  })
+  it('parseNumberFmt recognises custom and keeps the raw pattern', () => {
+    expect(parseNumberFmt('custom:0.00%')).toEqual({ type: 'custom', pattern: '0.00%', variant: '', decimals: null })
+  })
+})
