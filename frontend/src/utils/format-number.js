@@ -274,5 +274,7 @@ function _renderNumSpec(n, spec) {
   if (grouping) ip = ip.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 
   const out = fp.length ? `${ip}.${fp}` : ip
-  return (neg && out ? '-' : '') + out
+  // Suppress the sign when the value rounded to zero, so -0.4 with `0` shows
+  // "0", not "-0". `out` has no significant digit iff it's all zeros/separators.
+  return (neg && /[1-9]/.test(out) ? '-' : '') + out
 }
