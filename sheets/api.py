@@ -301,9 +301,14 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 	# as-is — ~1.5MB instead of the ~20MB decoded JSON for a big sheet — and let
 	# it decompress. Clients without it (older Safari) get the decoded payload.
 	raw = doc.sheets_data
+	# The read guard above only proves the caller can *view* the sheet. Ship an
+	# explicit write flag so the editor can render read-only (dim the toolbar,
+	# lock the grid, hide the save path) instead of letting a viewer type into a
+	# doc they can't persist and only discovering it when save_sheet throws.
 	return {
 		"name": doc.name,
 		"title": doc.title,
+		"can_write": bool(frappe.has_permission("Sheet", doc=name, ptype="write", throw=False)),
 		"sheets_data": raw if frappe.utils.cint(compressed) else decode_sheets_data(raw),
 	}
 

@@ -20,6 +20,7 @@
  *   setMarchingAnts: (v: null) => void,
  *   fillDown: () => void, fillRight: () => void,
  *   runSmartFill: () => void,
+ *   readOnly?: () => boolean,
  * }} actions
  */
 export function useShortcuts(actions) {
@@ -32,6 +33,7 @@ export function useShortcuts(actions) {
     clipboard, clipboardHas, setMarchingAnts,
     fillDown, fillRight,
     runSmartFill,
+    readOnly = () => false,
   } = actions
 
   function _isInInput() {
@@ -87,10 +89,16 @@ export function useShortcuts(actions) {
   function onGlobalKey(e) {
     const mod     = e.metaKey || e.ctrlKey
     const inInput = _isInInput()
-    if (_handleFormatKeys(e, mod, inInput)) return
-    if (_handleViewKeys(e, mod, inInput))   return
-    if (_handleNavKeys(e, mod, inInput))    return
-    if (_handleEscape(e, inInput))          return
+    // Read-only viewers: only the non-mutating shortcuts stay live (find,
+    // formulas toggle, zoom, help, Escape). Format/undo/redo, nav-edits
+    // (hyperlink, comment, quick-filter), and fill/smart-fill all mutate the
+    // doc, so skip them — they'd set isDirty for a save that can never land.
+    const ro = readOnly()
+    if (!ro && _handleFormatKeys(e, mod, inInput)) return
+    if (_handleViewKeys(e, mod, inInput))          return
+    if (!ro && _handleNavKeys(e, mod, inInput))    return
+    if (_handleEscape(e, inInput))                 return
+    if (ro) return
     if (mod && e.key === 'd' && !inInput) { e.preventDefault(); fillDown();  return }
     if (mod && e.key === 'r' && !inInput) { e.preventDefault(); fillRight(); return }
     // Cmd/Ctrl+E — Smart Fill. Matches Excel's Flash Fill shortcut. Detects

@@ -10,7 +10,7 @@ import { checkboxRect } from './checkbox-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true } = {}) {
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
 
@@ -648,6 +648,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   }
 
   function showEditor(initialValue, mode = 'enter') {
+    // Read-only viewers: never open the in-cell editor. This is the single
+    // choke point for every begin-edit path (typing, F2, Enter, double-click),
+    // so blocking it here keeps a viewer from typing into a cell that can't be
+    // saved. Selection/navigation still work.
+    if (!canEdit()) return
     editMode = mode
     selEnd = { r: sel.r, c: sel.c }
     const fmt = getFormat ? getFormat(cellId(sel.r, sel.c)) : {}
@@ -942,7 +947,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    const resizeCol = geo.hitTestColResize(e.clientX, e.clientY, rect)
+    const resizeCol = canEdit() ? geo.hitTestColResize(e.clientX, e.clientY, rect) : null
     if (resizeCol !== null) {
       e.preventDefault()
       // Broadcast resize: when the dragged column is part of a multi-column
@@ -959,7 +964,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    const resizeRowHit = geo.hitTestRowResize(e.clientX, e.clientY, rect)
+    const resizeRowHit = canEdit() ? geo.hitTestRowResize(e.clientX, e.clientY, rect) : null
     if (resizeRowHit !== null) {
       e.preventDefault()
       const range = getSelRange()
@@ -972,7 +977,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    if (hitTestFillHandle(e.clientX, e.clientY, rect)) {
+    if (canEdit() && hitTestFillHandle(e.clientX, e.clientY, rect)) {
       const { r0, c0, r1, c1 } = getSelRange()
       // Track the mousedown screen position so mousemove can ignore sub-pixel
       // jitter — otherwise a 1px wobble during the click extends the selection
@@ -1036,7 +1041,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
     // Click on the tickbox of a checkbox-validated cell → toggle it. Clicking
     // elsewhere in the cell falls through to a normal selection.
-    if (vrule?.type === 'checkbox') {
+    if (vrule?.type === 'checkbox' && canEdit()) {
       const x = geo.colX(h.c), y = geo.rowY(h.r)
       const w = geo.cw(h.c), hh = geo.rh(h.r)
       const box = checkboxRect(w, hh)
@@ -1054,7 +1059,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     // The caret zone tracks the chip when one is drawn (list rule + value),
     // else it's the plain arrow box at the cell's right edge. Only list rules
     // get a dropdown — number/length rules fall through to normal selection.
-    if (vrule?.type === 'list') {
+    if (vrule?.type === 'list' && canEdit()) {
       const x = geo.colX(h.c), y = geo.rowY(h.r)
       const w = geo.cw(h.c), cellRight = x + w
       const lx = (e.clientX - rect.left) / _zoom
@@ -1090,6 +1095,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   canvas.addEventListener('dblclick', e => {
     const rect = canvas.getBoundingClientRect()
+
+    // Read-only viewers: dbl-click neither edits a cell nor resizes/fills.
+    if (!canEdit()) return
 
     // Double-click on the fill handle → fill down to the bottom of the
     // adjacent column's contiguous data run (Google Sheets behaviour).
@@ -1347,6 +1355,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
+      if (!canEdit()) return
       const { r0, c0, r1, c1 } = getSelRange()
       if (r0 === r1 && c0 === c1) {
         onCommit?.(cellId(r, c), '')
