@@ -947,17 +947,43 @@
       </template>
     </Dialog>
 
-    <!-- Comment panel (floating near cell) -->
+    <!-- Threaded comment panel (floating near cell) -->
     <div v-if="commentPanel.open" class="sn-comment-panel"
          :style="{ left: commentPanel.x + 'px', top: commentPanel.y + 'px' }">
       <div class="sn-comment-header">
-        <span class="sn-comment-title">Note</span>
-        <Button variant="ghost" size="sm" icon="x" @click="commentPanel.open = false" />
+        <span class="sn-comment-title">
+          Comment
+          <span v-if="commentPanel.resolved" class="sn-comment-resolved">Resolved</span>
+        </span>
+        <div class="sn-comment-hactions">
+          <Button v-if="commentPanel.thread.length" variant="ghost" size="sm"
+                  :icon="commentPanel.resolved ? 'rotate-ccw' : 'check'"
+                  :tooltip="commentPanel.resolved ? 'Reopen' : 'Mark resolved'"
+                  @click="toggleResolveComment" />
+          <Button variant="ghost" size="sm" icon="x" @click="commentPanel.open = false" />
+        </div>
       </div>
-      <textarea class="sn-comment-ta" v-model="commentPanel.text" rows="4" placeholder="Add a note…" @blur="saveComment" />
+
+      <div v-if="commentPanel.thread.length" class="sn-comment-thread">
+        <div v-for="(r, i) in commentPanel.thread" :key="`${r.ts}-${r.author}`" class="sn-comment-reply">
+          <div class="sn-comment-reply-head">
+            <span class="sn-comment-author">{{ r.name || r.author || 'Someone' }}</span>
+            <span class="sn-comment-time">{{ commentTime(r.ts) }}</span>
+            <Button v-if="r.author && r.author === userEmail" variant="ghost" size="sm" icon="trash-2"
+                    tooltip="Delete" class="sn-comment-del" @click="deleteCommentReply(i)" />
+          </div>
+          <div class="sn-comment-text">{{ r.text }}</div>
+        </div>
+      </div>
+
+      <textarea class="sn-comment-ta" v-model="commentPanel.draft" rows="2"
+                :placeholder="commentPanel.thread.length ? 'Reply…' : 'Add a comment…'"
+                @keydown.enter.exact.prevent="addCommentReply" />
       <div class="sn-comment-actions">
-        <Button size="sm" variant="solid" @click="saveComment">Save</Button>
-        <Button size="sm" variant="ghost" theme="red" @click="deleteComment">Delete</Button>
+        <Button size="sm" variant="solid" :disabled="!commentPanel.draft.trim()" @click="addCommentReply">
+          {{ commentPanel.thread.length ? 'Reply' : 'Comment' }}
+        </Button>
+        <Button v-if="commentPanel.thread.length" size="sm" variant="ghost" theme="red" @click="deleteComment">Delete all</Button>
       </div>
     </div>
 
@@ -1516,7 +1542,7 @@ const isDirty           = ref(false)
 const isPaintingFormat  = ref(false)
 
 // ── Comment UI state ──────────────────────────────────────────────────────────
-const commentPanel  = reactive({ open: false, id: '', text: '', x: 0, y: 0 })
+const commentPanel  = reactive({ open: false, id: '', x: 0, y: 0, thread: [], resolved: false, draft: '' })
 
 // Notes side panel — global list of notes across all sheets, click-to-jump.
 // `rev` is bumped whenever a note is saved/deleted so the computed list
@@ -2959,7 +2985,7 @@ function _setupGridInstance() {
     getMergeInfo: id => merge.getMasterInfo(id, sheet.getCurrentSheet()),
     isSlave:      id => merge.isSlave(id, sheet.getCurrentSheet()),
     getMasterId:  id => merge.getMasterId(id, sheet.getCurrentSheet()),
-    getComment:   id => comments.get(id, sheet.getCurrentSheet()),
+    getComment:   id => comments.hasOpenComment(id, sheet.getCurrentSheet()),
     getValidation: id => validation.get(id, sheet.getCurrentSheet()),
     getCondFormat: (id, val) => condFormat.getFormatOverride(
       id, val, sheet.getCurrentSheet(),
@@ -3720,6 +3746,9 @@ function _afterHistoryNavigate() {
   _applyHiddenRows()        // filter state restored → re-apply to grid
   _syncViewMirrors()
   syncNames()
+  // The comment panel holds a reference into the (now-replaced) engine thread —
+  // close it so a stale index can't delete the wrong reply after undo/redo.
+  commentPanel.open = false
   activeCell.value   = 'A1'
   formulaValue.value = sheet.getCell('A1')
   refreshActiveFormat(); _syncNumberFormat('A1'); syncFlags()
@@ -3810,20 +3839,52 @@ function openCommentPanel() {
     x = rect.left + 60
     y = rect.top  + 40
   }
-  commentPanel.id   = id
-  commentPanel.text = comments.get(id, sheet.getCurrentSheet()) || ''
-  commentPanel.x    = x
-  commentPanel.y    = y
+  commentPanel.id = id
+  commentPanel.x  = x
+  commentPanel.y  = y
+  commentPanel.draft = ''
+  _loadCommentThread()
   commentPanel.open = true
 }
 
-function saveComment() {
-  comments.set(commentPanel.id, commentPanel.text, sheet.getCurrentSheet())
-  commentPanel.open = false
+// Mirror the engine's thread for `commentPanel.id` into the reactive panel.
+function _loadCommentThread() {
+  const t = comments.getThread(commentPanel.id, sheet.getCurrentSheet())
+  commentPanel.thread   = t ? t.thread : []
+  commentPanel.resolved = t ? t.resolved : false
+}
+
+// Shared post-mutation: repaint, record for undo (comments ride the snapshot),
+// and flag dirty so autosave persists the change.
+function _afterCommentChange() {
+  _loadCommentThread()
   notesPanel.rev++
   grid?.render()
-  history.push()   // comments live in the snapshot; record so undo can revert
+  history.push()
   isDirty.value = true
+}
+
+function addCommentReply() {
+  const text = commentPanel.draft.trim()
+  if (!text) return
+  comments.addReply(commentPanel.id, {
+    author: userEmail.value,
+    name:   userFullName.value || userEmail.value,
+    text,
+  }, sheet.getCurrentSheet())
+  commentPanel.draft = ''
+  _afterCommentChange()
+}
+
+function toggleResolveComment() {
+  comments.resolve(commentPanel.id, !commentPanel.resolved, sheet.getCurrentSheet())
+  _afterCommentChange()
+}
+
+function deleteCommentReply(i) {
+  comments.removeReply(commentPanel.id, i, sheet.getCurrentSheet())
+  _afterCommentChange()
+  if (!commentPanel.thread.length) commentPanel.open = false
 }
 
 function deleteComment() {
@@ -3833,6 +3894,16 @@ function deleteComment() {
   grid?.render()
   history.push()
   isDirty.value = true
+}
+
+// "5m ago" style relative time for a reply's epoch-ms timestamp.
+function commentTime(ts) {
+  if (!ts) return ''
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (s < 60)    return 'just now'
+  const m = Math.round(s / 60);   if (m < 60) return `${m}m ago`
+  const h = Math.round(m / 60);   if (h < 24) return `${h}h ago`
+  return new Date(ts).toLocaleDateString()
 }
 
 // ── Notes side panel ──────────────────────────────────────────────────────────
@@ -3846,11 +3917,11 @@ const allNotes = computed(() => {
   const list = []
   for (const name of sheetNames.value) {
     const map = comments.getAll(name) || {}
-    const entries = Object.entries(map)
-      .map(([id, text]) => ({ id, p: parseCellId(id), text }))
+    const entries = Object.keys(map)
+      .map(id => ({ id, p: parseCellId(id) }))
       .filter(e => e.p)
       .sort((a, b) => a.p.row - b.p.row || a.p.col - b.p.col)
-      .map(e => ({ sheet: name, id: e.id, text: e.text }))
+      .map(e => ({ sheet: name, id: e.id, text: comments.preview(e.id, name), resolved: !!comments.getThread(e.id, name)?.resolved }))
     list.push(...entries)
   }
   list.sort((a, b) => {
@@ -5446,6 +5517,16 @@ function toggleShowFormulas() {
 .sn-comment-ta     { resize:vertical; font-family:inherit; font-size:13px; color:var(--ink-gray-9); background:var(--surface-gray-1); border:1px solid var(--outline-gray-2); border-radius:6px; padding:6px 8px; min-height:64px; outline:none; }
 .sn-comment-ta:focus { border-color:var(--outline-gray-4); }
 .sn-comment-actions { display:flex; gap:6px; justify-content:flex-end; }
+.sn-comment-hactions { display:flex; align-items:center; gap:2px; }
+.sn-comment-resolved { margin-left:6px; font-size:10px; font-weight:600; letter-spacing:.03em; text-transform:none; color:var(--ink-green-3, #15803d); background:var(--surface-green-2, #e4f3e9); border-radius:999px; padding:1px 7px; }
+.sn-comment-thread  { display:flex; flex-direction:column; gap:10px; max-height:240px; overflow-y:auto; }
+.sn-comment-reply   { display:flex; flex-direction:column; gap:2px; }
+.sn-comment-reply-head { display:flex; align-items:center; gap:6px; }
+.sn-comment-author  { font-size:12.5px; font-weight:600; color:var(--ink-gray-9); }
+.sn-comment-time    { font-size:11px; color:var(--ink-gray-5); }
+.sn-comment-del     { margin-left:auto; opacity:0; }
+.sn-comment-reply:hover .sn-comment-del { opacity:1; }
+.sn-comment-text    { font-size:13px; color:var(--ink-gray-8); white-space:pre-wrap; word-break:break-word; }
 
 /* Notes side panel — docks the right edge of sn-grid-wrap, same dock as
    Version History (only one of the two is open at a time). */

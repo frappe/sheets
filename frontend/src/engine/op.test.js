@@ -39,7 +39,7 @@ function fakeValidation() {
 function fakeComments() {
 	const m = {}
 	return {
-		set(id, b) { m[id] = b },
+		setThread(id, b) { if (b) m[id] = b; else delete m[id] },
 		clear(id)  { delete m[id] },
 		get(id)    { return m[id] || null },
 	}
