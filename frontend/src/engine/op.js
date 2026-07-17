@@ -101,8 +101,9 @@ export function setCommentOp({ sheet, id, before, after }) {
 }
 
 function _applyComment(ctx, sheet, id, body) {
-	if (body) ctx.comments.set(id, body, sheet)
-	else      ctx.comments.clear(id, sheet)
+	// `body` is a whole thread object (or null). setThread replaces the cell's
+	// thread wholesale — matches how before/after are captured for undo.
+	ctx.comments.setThread(id, body, sheet)
 }
 
 // ── Structure ops (merge, resize, freeze, hide) ───────────────────────────────
