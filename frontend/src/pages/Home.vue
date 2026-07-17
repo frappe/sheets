@@ -56,6 +56,13 @@
             @click="setViewMode('grid')"
           />
         </div>
+        <!-- Overflow menu for secondary home-level destinations. Kept separate
+             from the New Sheet CTA so a nav item isn't styled as a peer action. -->
+        <Dropdown :options="overflowActions" placement="bottom-end">
+          <template #default="{ open }">
+            <Button :variant="open ? 'subtle' : 'ghost'" size="sm" icon="lucide-ellipsis-vertical" tooltip="More" />
+          </template>
+        </Dropdown>
         <Button variant="solid" @click="emit('new')">New Sheet</Button>
       </div>
     </div>
@@ -191,11 +198,12 @@
     <!-- Delete confirm dialog -->
     <Dialog
       v-model="showDeleteDialog"
-      :options="{ title: 'Delete sheet?', size: 'sm' }"
+      :options="{ title: 'Move to trash?', size: 'sm' }"
     >
       <template #body-content>
         <p class="home-confirm-text">
-          "<strong>{{ deleteTarget?.title }}</strong>" will be permanently deleted.
+          "<strong>{{ deleteTarget?.title }}</strong>" will be moved to Trash. You
+          can restore it from there before it's permanently deleted.
         </p>
       </template>
       <template #actions>
@@ -205,7 +213,7 @@
             theme="red"
             :loading="deleting"
             @click="doDelete"
-          >Delete</Button>
+          >Move to trash</Button>
           <Button @click="showDeleteDialog = false">Cancel</Button>
         </div>
       </template>
@@ -229,7 +237,7 @@ import {
 } from 'frappe-ui'
 import { call } from '../utils/api.js'
 
-const emit = defineEmits(['open', 'new'])
+const emit = defineEmits(['open', 'new', 'trash'])
 
 const sheets       = ref([])
 const loading      = ref(true)
@@ -270,6 +278,12 @@ function setViewMode(mode) {
 // the logged-in user on its own. Comparing sheet.owner against an empty
 // `window.frappe?.session?.user` made every sheet look "shared" and
 // hid the owner-only Rename/Delete actions.
+// Top-level overflow menu (the ⋮ next to New Sheet). Just Trash for now; this
+// is the home for future home-level destinations (Shared, Settings, …).
+const overflowActions = [
+  { label: 'Trash', icon: 'trash-2', onClick: () => emit('trash') },
+]
+
 function isOwnedByMe(sheet) { return !!sheet.is_owner }
 
 function shortOwner(sheet) {

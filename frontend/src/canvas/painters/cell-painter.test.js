@@ -69,6 +69,31 @@ describe('CellPainter', () => {
     })
   })
 
+  describe('checkbox validation', () => {
+    // drawRegionCells arg 10 (index 9) is getValidation.
+    const drawCheckbox = (value, ruleType = 'checkbox') => {
+      const getValidation = vi.fn(() => ({ type: ruleType }))
+      painter.drawRegionCells(0, 0, 0, 0, gv({ 'A1': value }),
+        null, null, null, null, getValidation)
+    }
+
+    it('draws a hollow box (stroke) for an unchecked cell', () => {
+      drawCheckbox('FALSE')
+      expect(ctx.stroke).toHaveBeenCalled()
+    })
+
+    it('fills the box and strokes a tick for a checked cell', () => {
+      drawCheckbox('TRUE')
+      expect(ctx.fill).toHaveBeenCalled()
+      expect(ctx.stroke).toHaveBeenCalled()   // the white tick
+    })
+
+    it('does not paint the raw TRUE/FALSE text over the box', () => {
+      drawCheckbox('TRUE')
+      expect(ctx.fillText).not.toHaveBeenCalled()
+    })
+  })
+
   describe('drawRegionBorders', () => {
     it('does nothing when getFormat is null', () => {
       painter.drawRegionBorders(0, 0, 2, 2, null, null, null)

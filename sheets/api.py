@@ -276,6 +276,7 @@ def list_sheets() -> list:
 	me = frappe.session.user
 	rows = frappe.get_list(
 		"Sheet",
+		filters={"trashed": 0},
 		fields=["name", "title", "modified", "owner"],
 		order_by="modified desc",
 		limit=100,
@@ -292,13 +293,22 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 	# its contents.
 	frappe.has_permission("Sheet", doc=name, throw=True)
 	doc = frappe.get_doc("Sheet", name)
+	# A trashed sheet must not open from a bookmarked/shared ?id= link — it's
+	# "deleted" as far as the app is concerned until restored.
+	if doc.trashed:
+		frappe.throw("This sheet is in the trash.", frappe.DoesNotExistError)
 	# When the client can gunzip (DecompressionStream), ship the stored envelope
 	# as-is — ~1.5MB instead of the ~20MB decoded JSON for a big sheet — and let
 	# it decompress. Clients without it (older Safari) get the decoded payload.
 	raw = doc.sheets_data
+	# The read guard above only proves the caller can *view* the sheet. Ship an
+	# explicit write flag so the editor can render read-only (dim the toolbar,
+	# lock the grid, hide the save path) instead of letting a viewer type into a
+	# doc they can't persist and only discovering it when save_sheet throws.
 	return {
 		"name": doc.name,
 		"title": doc.title,
+		"can_write": bool(frappe.has_permission("Sheet", doc=name, ptype="write", throw=False)),
 		"sheets_data": raw if frappe.utils.cint(compressed) else decode_sheets_data(raw),
 	}
 
@@ -346,18 +356,67 @@ def record_op(
 
 @frappe.whitelist()
 def delete_sheet(name: str) -> str:
-	# Frappe's default link enforcement blocks deletion when child rows exist.
-	# We own the lifecycle of Sheet Snapshot / Sheet Op Log / Sheet Seq, so a
-	# Sheet delete should cascade across them — atomically and in dependency
-	# order. The head pointer on Sheet is cleared first so the snapshot delete
-	# doesn't trip the "linked from Sheet" check.
+	# Soft delete: flag the sheet as trashed instead of destroying it, so the
+	# owner can restore it within the retention window. The `delete` ptype gate
+	# is owner-only (the "All" role's delete perm is `if_owner`), so a shared
+	# collaborator can't trash someone else's sheet. Versioning tables are left
+	# fully intact — a restore is a perfect restore, not a last-save recovery.
+	# The nightly purge (sheets.trash.purge_trashed_sheets) does the real erase.
 	frappe.has_permission("Sheet", doc=name, ptype="delete", throw=True)
-	frappe.db.set_value("Sheet", name, "head_snapshot", None, update_modified=False)
-	frappe.db.delete("Sheet Snapshot", {"sheet": name})
-	frappe.db.delete("Sheet Op Log",   {"sheet": name})
-	frappe.db.delete("Sheet Seq",      {"sheet": name})
-	frappe.delete_doc("Sheet", name, ignore_permissions=False)
+	frappe.db.set_value(
+		"Sheet",
+		name,
+		{"trashed": 1, "trashed_on": frappe.utils.now_datetime(), "trashed_by": frappe.session.user},
+		update_modified=False,
+	)
 	return "ok"
+
+
+@frappe.whitelist()
+def restore_sheet(name: str) -> str:
+	# Same owner-only gate as trashing — restore is the inverse of delete.
+	frappe.has_permission("Sheet", doc=name, ptype="delete", throw=True)
+	frappe.db.set_value(
+		"Sheet",
+		name,
+		{"trashed": 0, "trashed_on": None, "trashed_by": None},
+		update_modified=False,
+	)
+	return "ok"
+
+
+@frappe.whitelist()
+def delete_sheet_permanent(name: str) -> str:
+	# Irreversible "delete forever" from the trash. Owner-only, same as trashing.
+	# The cascade lives in sheets.trash so it stays in lockstep with the purge.
+	frappe.has_permission("Sheet", doc=name, ptype="delete", throw=True)
+	# Only ever fire from the trash flow: a direct call on a live sheet must not
+	# skip the recovery window and destroy it in one shot.
+	if not frappe.db.get_value("Sheet", name, "trashed"):
+		frappe.throw("Only sheets in the trash can be permanently deleted.")
+	from sheets.trash import hard_delete_sheet
+
+	hard_delete_sheet(name)
+	return "ok"
+
+
+@frappe.whitelist()
+def list_trash() -> dict:
+	# Trash is owner-scoped: only the owner can trash/restore, so a shared
+	# collaborator has no business seeing another user's trash. Filter to the
+	# caller's own trashed sheets explicitly rather than leaning on the share
+	# grant that list_sheets uses. `retention_days` rides along so the UI can
+	# state the exact purge window instead of assuming the default.
+	from sheets.trash import retention_days
+
+	sheets = frappe.get_list(
+		"Sheet",
+		filters={"trashed": 1, "owner": frappe.session.user},
+		fields=["name", "title", "trashed_on"],
+		order_by="trashed_on desc",
+		limit=100,
+	)
+	return {"sheets": sheets, "retention_days": retention_days()}
 
 
 @frappe.whitelist()

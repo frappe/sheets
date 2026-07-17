@@ -6,14 +6,16 @@
 // `window.frappe.boot.sentry_dsn`. With no DSN this module is a no-op
 // so local development never tries to ship to anyone's project.
 //
-// User identification piggybacks on the same `window.frappe.session`
-// shim that drives the top-right avatar, so every captured event
-// already carries the email of the affected user without us having
-// to plumb anything through the app.
+// User identification goes through the same session resolver that drives
+// the top-right avatar (window.frappe shim or Frappe's login cookies), so
+// every captured event carries the email of the affected user without us
+// having to plumb anything through the app.
 
 // Dynamic import so @sentry/vue (~90 kB gzipped) only enters the
 // network at all on sites that have configured a DSN. The bare-bones
 // SPA bundle stays unchanged for everyone else.
+import { getSessionUser } from './session.js'
+
 export function initSentry(app) {
   const boot = (typeof window !== 'undefined' && window.frappe?.boot) || {}
   const dsn  = boot.sentry_dsn
@@ -36,7 +38,7 @@ export function initSentry(app) {
         ? boot.sentry_replay_on_error_rate
         : 0,
     })
-    const user = window.frappe?.session?.user
+    const user = getSessionUser().user
     if (user) Sentry.setUser({ email: user, username: user })
   }).catch(err => {
     // Don't crash the SPA if Sentry's chunk fails to load — just log

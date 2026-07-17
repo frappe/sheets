@@ -2,6 +2,7 @@
 // Rule shape: { type: 'list',        options: ['A','B','C'], message? }
 //             { type: 'number',      operator: 'between'|'gt'|'gte'|'lt'|'lte'|'eq'|'neq'|'not_between', min, max?, message? }
 //             { type: 'text_length', operator: 'between'|'gt'|'gte'|'lt'|'lte'|'eq'|'neq'|'not_between', min, max?, message? }
+//             { type: 'checkbox',    message? }  — cell holds TRUE / FALSE, painted as a tickbox
 // Pure state, no DOM dependency.
 
 import { parseCellId, colLabel } from '../utils/cells.js'
@@ -25,9 +26,16 @@ function _checkNumOp(n, op, min, max) {
 // Shared by the engine's per-cell validate() and the canvas painter (which
 // needs to know validity to draw the invalid marker) so there's one source
 // of truth for what "valid" means. No state, no sheet lookup.
+//
+// `severity` echoes the rule's setting: 'reject' (default) blocks the edit,
+// 'warn' lets it through but flags the cell. Callers gate on it.
 export function checkRule(rule, value) {
   if (!rule) return { valid: true }
+  const res = _evalRule(rule, value)
+  return { ...res, severity: res.valid ? undefined : (rule.severity || 'reject') }
+}
 
+function _evalRule(rule, value) {
   if (rule.type === 'list') {
     const opts = rule.options || []
     const ok = opts.includes(String(value))
@@ -45,6 +53,12 @@ export function checkRule(rule, value) {
     const len = String(value == null ? '' : value).length
     const ok = _checkNumOp(len, rule.operator, rule.min, rule.max)
     return { valid: ok, message: ok ? null : (rule.message || 'Text length out of allowed range') }
+  }
+
+  if (rule.type === 'checkbox') {
+    const up = String(value).toUpperCase()
+    const ok = up === 'TRUE' || up === 'FALSE'
+    return { valid: ok, message: ok ? null : (rule.message || 'Value must be TRUE or FALSE') }
   }
 
   return { valid: true }

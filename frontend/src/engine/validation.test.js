@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { createValidationEngine } from './validation.js'
+import { createValidationEngine, checkRule } from './validation.js'
 
 describe('ValidationEngine', () => {
   let v
@@ -55,6 +55,26 @@ describe('ValidationEngine', () => {
     })
   })
 
+  describe('validate — checkbox', () => {
+    beforeEach(() => v.set('C1', { type: 'checkbox' }, 'Sheet1'))
+
+    it('passes for TRUE / FALSE, case-insensitively', () => {
+      expect(v.validate('C1', 'TRUE', 'Sheet1').valid).toBe(true)
+      expect(v.validate('C1', 'false', 'Sheet1').valid).toBe(true)
+    })
+
+    it('fails for any other value', () => {
+      const r = v.validate('C1', 'yes', 'Sheet1')
+      expect(r.valid).toBe(false)
+      expect(r.message).toMatch(/TRUE.*FALSE/)
+    })
+
+    it('shifts and round-trips like any rule', () => {
+      v.insertRow(0, 'Sheet1')
+      expect(v.get('C2', 'Sheet1')).toEqual({ type: 'checkbox' })
+    })
+  })
+
   it('passes all values when no rule exists', () => {
     expect(v.validate('Z9', 'anything', 'Sheet1').valid).toBe(true)
   })
@@ -72,5 +92,22 @@ describe('ValidationEngine', () => {
     const v2 = createValidationEngine()
     v2.restore(snap)
     expect(v2.get('A1', 'Sheet1')).toEqual({ type: 'list', options: ['a', 'b'] })
+  })
+})
+
+describe('checkRule — severity', () => {
+  const rule = { type: 'number', operator: 'between', min: 1, max: 10 }
+
+  it('defaults failing rules to reject', () => {
+    expect(checkRule(rule, 50).severity).toBe('reject')
+  })
+  it('reports warn when the rule opts into it', () => {
+    const warnRule = { ...rule, severity: 'warn' }
+    const res = checkRule(warnRule, 50)
+    expect(res.valid).toBe(false)
+    expect(res.severity).toBe('warn')
+  })
+  it('leaves severity undefined for a passing value', () => {
+    expect(checkRule({ ...rule, severity: 'warn' }, 5).severity).toBeUndefined()
   })
 })

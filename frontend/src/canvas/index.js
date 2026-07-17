@@ -3,13 +3,14 @@ import { createRenderer } from './renderer.js'
 import { createOverlay }  from './overlay.js'
 import { TOTAL_ROWS, TOTAL_COLS, DEFAULT_TOTAL_ROWS, DEFAULT_TOTAL_COLS, DEFAULT_ROW_H, ROW_HEADER_W, COL_HEADER_H, setTotalRows, setTotalCols } from './constants.js'
 import { cellId, colLabel, parseCellId } from '../utils/cells.js'
-import { AC_FUNS, AC_FUN_KEYS, parseAcToken } from '../utils/formula-ac.js'
+import { AC_FUNS, AC_FUN_KEYS, parseAcToken, parseSignatureContext, describeSignature } from '../utils/formula-ac.js'
 import { isWrapText } from '../utils/text-wrap.js'
 import { CHIP, chipMetrics } from './chip-geometry.js'
+import { checkboxRect } from './checkbox-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onDropdownClick, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true } = {}) {
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
 
@@ -297,7 +298,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   function _acUpdate(value, cursor) {
     if (!_acEl) return
     const result = parseAcToken(value, cursor)
-    if (!result) { _acHide(); return }
+    // No name being typed — fall back to parameter help if the caret is inside
+    // a known function's parens. Leaves _acItems empty so key nav ignores it.
+    if (!result) { _acShowSignature(value, cursor); return }
     const up     = result.tok.toUpperCase()
     const fns    = AC_FUN_KEYS.filter(n => n.startsWith(up)).slice(0, 6)
     const sheets = (getSheetNames?.() || [])
@@ -351,6 +354,27 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if (_acEl) _acEl.style.display = 'none'
   }
 
+  // Non-selectable parameter-help row: shows FN(a, b, c) with the argument the
+  // caret is on bolded. _acItems stays empty so Up/Down/Enter/Tab don't capture.
+  function _acShowSignature(value, cursor) {
+    const ctx = parseSignatureContext(value, cursor)
+    const desc = ctx && describeSignature(ctx.fn, ctx.argIndex)
+    if (!desc) { _acHide(); return }
+    _acItems = []; _acIdx = 0
+    const params = desc.params
+      .map((p, i) => i === desc.active ? `<b style="color:#171717;">${p}</b>` : p)
+      .join(', ')
+    _acEl.innerHTML =
+      `<div style="padding:6px 12px;white-space:nowrap;color:#7c7c7c;">` +
+      `<span style="font-weight:600;color:#171717;">${ctx.fn}</span>(${params})</div>`
+    const ox = parseFloat(overlay.el.style.left)   || 0
+    const oy = parseFloat(overlay.el.style.top)    || 0
+    const oh = parseFloat(overlay.el.style.height) || 24
+    _acEl.style.left    = ox + 'px'
+    _acEl.style.top     = (oy + oh + 2) + 'px'
+    _acEl.style.display = 'block'
+  }
+
   // item: { name, kind: 'fn' | 'sheet' }
   function _acCommit(item) {
     const input  = overlay.el
@@ -364,6 +388,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       const pos    = tokStart + item.name.length + 1
       input.setSelectionRange(pos, pos)
       onInput?.(cellId(sel.r, sel.c), newVal)
+      input.focus()
+      // Accepting a function inserts its '(' — surface its parameter help
+      // immediately instead of leaving the user with a bare, empty popup.
+      _acUpdate(newVal, pos)
+      return
     }
     _acHide()
     input.focus()
@@ -647,6 +676,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   }
 
   function showEditor(initialValue, mode = 'enter') {
+    // Read-only viewers: never open the in-cell editor. This is the single
+    // choke point for every begin-edit path (typing, F2, Enter, double-click),
+    // so blocking it here keeps a viewer from typing into a cell that can't be
+    // saved. Selection/navigation still work.
+    if (!canEdit()) return
     editMode = mode
     selEnd = { r: sel.r, c: sel.c }
     const fmt = getFormat ? getFormat(cellId(sel.r, sel.c)) : {}
@@ -941,7 +975,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    const resizeCol = geo.hitTestColResize(e.clientX, e.clientY, rect)
+    const resizeCol = canEdit() ? geo.hitTestColResize(e.clientX, e.clientY, rect) : null
     if (resizeCol !== null) {
       e.preventDefault()
       // Broadcast resize: when the dragged column is part of a multi-column
@@ -958,7 +992,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    const resizeRowHit = geo.hitTestRowResize(e.clientX, e.clientY, rect)
+    const resizeRowHit = canEdit() ? geo.hitTestRowResize(e.clientX, e.clientY, rect) : null
     if (resizeRowHit !== null) {
       e.preventDefault()
       const range = getSelRange()
@@ -971,7 +1005,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    if (hitTestFillHandle(e.clientX, e.clientY, rect)) {
+    if (canEdit() && hitTestFillHandle(e.clientX, e.clientY, rect)) {
       const { r0, c0, r1, c1 } = getSelRange()
       // Track the mousedown screen position so mousemove can ignore sub-pixel
       // jitter — otherwise a 1px wobble during the click extends the selection
@@ -1031,12 +1065,29 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
+    const vrule = getValidation?.(hId)
+
+    // Click on the tickbox of a checkbox-validated cell → toggle it. Clicking
+    // elsewhere in the cell falls through to a normal selection.
+    if (vrule?.type === 'checkbox' && canEdit()) {
+      const x = geo.colX(h.c), y = geo.rowY(h.r)
+      const w = geo.cw(h.c), hh = geo.rh(h.r)
+      const box = checkboxRect(w, hh)
+      const lx = (e.clientX - rect.left) / _zoom - x
+      const ly = (e.clientY - rect.top)  / _zoom - y
+      if (lx >= box.x && lx <= box.x + box.size && ly >= box.y && ly <= box.y + box.size) {
+        e.stopPropagation()
+        moveSel(h.r, h.c)
+        onCheckboxToggle?.(hId)
+        return
+      }
+    }
+
     // Click on the dropdown caret of a list-validated cell → open dropdown.
     // The caret zone tracks the chip when one is drawn (list rule + value),
     // else it's the plain arrow box at the cell's right edge. Only list rules
     // get a dropdown — number/length rules fall through to normal selection.
-    const vrule = getValidation?.(hId)
-    if (vrule?.type === 'list') {
+    if (vrule?.type === 'list' && canEdit()) {
       const x = geo.colX(h.c), y = geo.rowY(h.r)
       const w = geo.cw(h.c), cellRight = x + w
       const lx = (e.clientX - rect.left) / _zoom
@@ -1072,6 +1123,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   canvas.addEventListener('dblclick', e => {
     const rect = canvas.getBoundingClientRect()
+
+    // Read-only viewers: dbl-click neither edits a cell nor resizes/fills.
+    if (!canEdit()) return
 
     // Double-click on the fill handle → fill down to the bottom of the
     // adjacent column's contiguous data run (Google Sheets behaviour).
@@ -1329,6 +1383,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
+      if (!canEdit()) return
       const { r0, c0, r1, c1 } = getSelRange()
       if (r0 === r1 && c0 === c1) {
         onCommit?.(cellId(r, c), '')

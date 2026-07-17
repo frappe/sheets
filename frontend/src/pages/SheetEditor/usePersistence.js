@@ -9,6 +9,10 @@ import { packSheet, packSheetChunked, unpackSheet, boundsOf } from '../../utils/
 export function usePersistence({ sheet, formats, merge, comments, validation, condFormat, sortFilter, pivot, charts, namedRanges, getViewState, applyViewState, currentTitle, emit }) {
   const isSaving  = ref(false)
   const saveError = ref('')
+  // Write permission for the currently-loaded sheet, from get_sheet's `can_write`.
+  // Defaults to true so a brand-new (autoCreate) doc — which the creator always
+  // owns — never flashes read-only before the first load resolves.
+  const canWrite  = ref(true)
   // Surfaces "couldn't open this sheet" cases (404 / 403 / network) to the
   // editor so it can render a proper error screen instead of mounting a
   // blank canvas. Shape: { kind: 'denied' | 'missing' | 'other', message }.
@@ -36,6 +40,9 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
       if (saved.charts     && charts?.restore)     charts.restore(saved.charts)
       if (saved.namedRanges && namedRanges?.restore) namedRanges.restore(saved.namedRanges)
       currentTitle.value = doc.title
+      // Older backends predate `can_write`; treat its absence as writable so we
+      // never lock out an editor on a stale server.
+      canWrite.value = doc.can_write !== false
     } catch (err) {
       console.error('Load failed:', err)
       const t = err?.excType || ''
@@ -164,5 +171,5 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
     }
   }
 
-  return { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, retrySave }
+  return { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave }
 }

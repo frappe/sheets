@@ -72,11 +72,20 @@
             @click="onRetrySave"
           />
         </template>
+        <!-- View-only indicator — shown up front so a viewer knows they can't
+             edit before they try. Neutral gray (not an error) because read
+             access is expected, not a failure. Uses the Frappe UI Badge so it
+             matches the save-error chip beside it and the Espresso tokens. -->
+        <Tooltip v-if="readOnly" text="You have view access. Ask the owner for edit access to make changes.">
+          <Badge theme="gray" variant="subtle" size="lg" label="View only">
+            <template #prefix><FeatherIcon name="eye" class="h-3.5 w-3.5" /></template>
+          </Badge>
+        </Tooltip>
       </div>
       <div class="sn-topbar-right">
         <!-- AI Assist entry point — shown only when an admin has configured a
              key and enabled it (gated server-side via the boot flag). -->
-        <template v-if="aiEnabled">
+        <template v-if="aiEnabled && !readOnly">
           <Button
             variant="ghost"
             size="sm"
@@ -155,7 +164,11 @@
     </div>
 
     <!-- Bar 2 · Formatting toolbar -->
-    <div class="sn-toolbar">
+    <!-- Read-only viewers: dim the whole bar and swallow pointer events so no
+         formatting/insert/chart action is reachable. Undo/Redo and dropdowns
+         come along for free without touching each button. -->
+    <div class="sn-toolbar" :class="{ 'sn-toolbar--readonly': readOnly }"
+         :aria-disabled="readOnly || undefined">
 
       <!-- Number format -->
       <Dropdown :options="numberFormatDropdownOptions" placement="left" class="sn-numfmt">
@@ -296,10 +309,11 @@
           name="formula-bar"
           class="sn-formula-input"
           :value="formulaValue"
+          :readonly="readOnly"
           @input="onFormulaInput"
           @keydown="onFormulaKey"
           @blur="closeAc"
-          placeholder="Enter value or formula"
+          :placeholder="readOnly ? '' : 'Enter value or formula'"
           spellcheck="false"
           autocomplete="off"
         />
@@ -430,6 +444,15 @@
         @choose="onSplitChoose"
         @apply="onSplitApply"
         @cancel="onSplitCancel"
+      />
+
+      <!-- Outline around the active filter's range so its extent is visible.
+           pointer-events:none keeps clicks reaching the canvas underneath. -->
+      <div
+        v-if="filterHighlightStyle"
+        class="sn-filter-range"
+        :style="filterHighlightStyle"
+        aria-hidden="true"
       />
 
       <!-- Filter chevrons on row 0 (the user's header row of data) -->
@@ -584,7 +607,7 @@
     <div class="sn-bottom">
       <!-- Pinned outside the scroll track so it stays reachable no matter
            how many tabs there are. -->
-      <Button variant="ghost" size="sm" icon="plus" class="sn-tab-add" tooltip="Add sheet" @click="addSheet" />
+      <Button variant="ghost" size="sm" icon="plus" class="sn-tab-add" tooltip="Add sheet" :disabled="readOnly" @click="addSheet" />
       <div class="sn-tabs-track">
         <div
           v-for="name in sheetNames"
@@ -895,6 +918,15 @@
             label="Error message (optional)"
             placeholder="This value is not allowed"
           />
+
+          <!-- On invalid: block the edit, or allow it with a warning -->
+          <FormControl v-if="validationDialog.type !== 'checkbox'"
+            type="select" label="When the value is invalid" v-model="validationDialog.severity"
+            :options="[
+              { label: 'Reject the input',        value: 'reject' },
+              { label: 'Allow, but show a warning', value: 'warn' },
+            ]"
+          />
         </div>
       </template>
       <template #actions>
@@ -1116,8 +1148,10 @@
 <script setup>
 import { h, ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { createGrid }          from '../../canvas/index.js'
+import { COL_HEADER_H, ROW_HEADER_W } from '../../canvas/constants.js'
 import { colLabel, parseCellId, cellId } from '../../utils/cells.js'
 import { call } from '../../utils/api.js'
+import { getSessionUser, userInitials } from '../../utils/session.js'
 import { parseNumberFmt, buildNumberFmt, applyNumberFmt } from '../../utils/format-number.js'
 import { getTextWrap } from '../../utils/text-wrap.js'
 import { computeFillDown, computeFillRight } from '../../engine/fill-series.js'
@@ -1559,6 +1593,7 @@ const validationDialog = reactive({
   val2:     '',
   listRaw:  '',
   message:  '',
+  severity: 'reject',   // 'reject' blocks the edit; 'warn' allows it but flags the cell
 })
 
 // ── Conditional format dialog state ───────────────────────────────────────────
@@ -1712,10 +1747,11 @@ const fileDropdownOptions = computed(() => [
     { label: 'Export as XLSX', icon: 'download',  onClick: () => exportXLSX() },
     { label: 'Export as PDF',  icon: 'printer',   onClick: () => exportPDF() },
   ]},
-  { group: 'Import', items: [
+  // Import writes cells — hide it for viewers (export/read stays available).
+  ...(readOnly.value ? [] : [{ group: 'Import', items: [
     { label: 'Import CSV',  icon: 'upload', onClick: () => csvInputRef.value?.click() },
     { label: 'Import XLSX', icon: 'upload', onClick: () => xlsxInputRef.value?.click() },
-  ]},
+  ]}]),
   // Only shown to admins — gated server-side via the boot flag so non-admins
   // never see a settings entry they can't use.
   ...(window.frappe?.boot?.ai_assist_can_configure
@@ -1874,28 +1910,21 @@ const titleInputWidth = computed(() => {
 })
 
 
-// window.frappe is now seeded by sheets.html (see www/sheets.py).
-// Read it lazily into refs and refresh on mount so the avatar reflects
-// the actual logged-in user instead of the "U" fallback if Frappe's
-// own boot script later re-populates the global.
-const userEmail    = ref(window.frappe?.session?.user || '')
-const userFullName = ref(window.frappe?.session?.user_fullname || '')
-const userImage    = ref(window.frappe?.session?.user_image || '')
-const userInitial  = computed(() => {
-  // Prefer initials from full name ("Asif Mulani" → "AM"); fall back to
-  // the first letter of the email, then the literal "U" so the avatar
-  // never collapses into something empty.
-  const fn = userFullName.value.trim()
-  if (fn) {
-    const parts = fn.split(/\s+/)
-    return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase()
-  }
-  return (userEmail.value ? userEmail.value[0] : 'U').toUpperCase()
-})
+// The logged-in user for the top-right avatar. Resolved from the
+// www/sheets.html shim when Sheets runs standalone, and from Frappe's login
+// cookies when it's embedded in the suite frontend (which never sets
+// window.frappe) — see utils/session.js. Re-read on mount in case the global
+// is populated after this module is evaluated.
+const _u = getSessionUser()
+const userEmail    = ref(_u.user)
+const userFullName = ref(_u.fullName)
+const userImage    = ref(_u.image)
+const userInitial  = computed(() => userInitials(userFullName.value, userEmail.value))
 onMounted(() => {
-  userEmail.value    = window.frappe?.session?.user          || userEmail.value
-  userFullName.value = window.frappe?.session?.user_fullname || userFullName.value
-  userImage.value    = window.frappe?.session?.user_image    || userImage.value
+  const u = getSessionUser()
+  userEmail.value    = u.user     || userEmail.value
+  userFullName.value = u.fullName  || userFullName.value
+  userImage.value    = u.image     || userImage.value
 })
 
 // Collaboration — presence + sharing
@@ -2236,7 +2265,7 @@ const textWrapDropdownOptions = computed(() => [
 // fallbacks only cover the impossible window where someone saves before
 // useSheetTabs has finished initializing.
 let _sheetTabs = null
-const { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
+const { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
     sheet, formats, merge, comments, validation, condFormat, sortFilter, pivot,
     charts, namedRanges,
@@ -2247,6 +2276,13 @@ const { isSaving, saveError, loadError, loadSheet, autoCreate, saveExisting, ret
     },
     currentTitle, emit,
   })
+
+// View-only mode: the loaded sheet is shared with the current user at read
+// (not write) permission. Everything that mutates the doc keys off this — the
+// grid edit gate, the toolbar/formula-bar disable, the context menu, and the
+// autosave path all no-op so a viewer is never misled into editing a doc they
+// can't persist (and never triggers the server's PermissionError on save).
+const readOnly = computed(() => !canWrite.value)
 
 _sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
@@ -2278,6 +2314,14 @@ const { acItems, acIdx, acUp, acVisible, updateAc, commitAc, closeAc } =
 // Context menu — placed here because contextMenu is passed to usePivotIntegration below.
 const { contextMenu, tabMenu, openCanvasContextMenu: onCanvasContextMenu, openTabMenu } =
   useContextMenu({ getGrid: () => grid })
+
+// The right-click menu is entirely mutation actions (insert/delete/freeze/
+// paste-special/…), so suppress it for viewers — the native browser menu still
+// offers copy. Defined here (after the alias) and wired at listener setup.
+function _onCanvasContextMenu(e) {
+  if (readOnly.value) return
+  onCanvasContextMenu(e)
+}
 
 // renderVersion is defined here because usePivotIntegration reads it at call time.
 const renderVersion = ref(0)
@@ -2543,6 +2587,34 @@ const filterPanelStyle = computed(() => {
   return {
     top:  (rowRect.y + rowRect.height + 2) + 'px',
     left: clampFilterLeft(colRect.x + colRect.width - BTN - 3, wrapW) + 'px',
+  }
+})
+
+// Outline drawn around the active filter's rectangle so its extent is visible
+// (Google-Sheets-style). Mirrors the pivot highlight: bounding box from the
+// range's top-left / bottom-right cell rects, clamped to the header strips so
+// it never paints over the row-number gutter or column-header row when the
+// range is scrolled partly out of view.
+const filterHighlightStyle = computed(() => {
+  renderVersion.value
+  if (!showSortFilter.value || !grid || !filterRange.value) return null
+  const { r0, c0, r1, c1 } = filterRange.value
+  const tl = grid.getCellRect?.(r0, c0)
+  const br = grid.getCellRect?.(r1, c1)
+  if (!tl || !br) return null
+  const zoom    = grid.getZoom?.() ?? 1
+  const headerY = COL_HEADER_H * zoom
+  const headerX = ROW_HEADER_W * zoom
+  const right   = br.x + br.width
+  const bottom  = br.y + br.height
+  if (bottom <= headerY || right <= headerX) return null
+  const top  = Math.max(tl.y, headerY)
+  const left = Math.max(tl.x, headerX)
+  return {
+    top:    top  + 'px',
+    left:   left + 'px',
+    width:  (right  - left) + 'px',
+    height: (bottom - top)  + 'px',
   }
 })
 
@@ -2925,7 +2997,9 @@ function _setupGridInstance() {
       const trimmed = String(value ?? '').trim()
       if (trimmed !== '') {
         const v = validation.validate(id, value, writeSheet)
-        if (!v.valid) {
+        // 'warn' rules let the value through but surface a transient notice;
+        // 'reject' (default) blocks the edit and repaints the pre-edit value.
+        if (!v.valid && v.severity !== 'warn') {
           const msg = v.message || 'Value rejected by data validation rule'
           saveError.value = msg
           setTimeout(() => { if (saveError.value === msg) saveError.value = '' }, 3500)
@@ -2936,6 +3010,11 @@ function _setupGridInstance() {
           editingHomeCell.value  = null
           syncFlags()
           return
+        }
+        if (!v.valid && v.severity === 'warn') {
+          const msg = v.message || 'Value flagged by data validation rule'
+          saveError.value = msg
+          setTimeout(() => { if (saveError.value === msg) saveError.value = '' }, 3500)
         }
       }
 
@@ -3044,13 +3123,17 @@ function _setupGridInstance() {
     // Lazy render is the default; eager `data` cache stays as an opt-out
     // fallback (`?lazy=0`). See _lazyValuesEnabled.
     lazyValues: _lazyValuesEnabled(),
+    // Gate every in-canvas mutation (begin-edit, delete, fill, resize,
+    // checkbox/dropdown) on write permission. Read-only viewers keep
+    // selection, navigation and copy.
+    canEdit: () => !readOnly.value,
   })
   // Keep DOM overlays (filter chevrons) in sync with canvas scroll/resize/freeze.
   grid.onRender(() => { renderVersion.value++ })
 }
 
 function _setupEventListeners() {
-  canvasRef.value.addEventListener('contextmenu', onCanvasContextMenu)
+  canvasRef.value.addEventListener('contextmenu', _onCanvasContextMenu)
   // computeSelectionStats fires from the grid's onSelect callback on every
   // selection change (moveSel + extendSel both emit it). The redundant
   // mouseup/keyup listeners that used to live here doubled the per-event
@@ -3132,7 +3215,7 @@ onBeforeUnmount(() => {
   // debounce window) silently drops the most recent changes — exactly the
   // "data is lost when I come back" report. The fetch uses `keepalive: true`
   // so the request survives the unmount.
-  if (isDirty.value && props.id && props.id !== 'new') {
+  if (isDirty.value && !readOnly.value && props.id && props.id !== 'new') {
     saveExisting(props.id, currentTitle.value, { keepalive: true })
   }
   window.removeEventListener('beforeunload', onBeforeUnloadGuard)
@@ -3341,6 +3424,10 @@ function _triggerAutoSave() {
 
 async function _doAutoSave() {
   if (!isDirty.value) return
+  // Backstop: a viewer should never reach save_sheet (which would throw
+  // PermissionError). The input layer already blocks their edits, so isDirty
+  // stays false — but guard here too in case a mutation path is ever missed.
+  if (readOnly.value) return
   // Bootstrap is handled by _loadInitialData's autoCreate(); calling
   // saveExisting('new') would explode with "Sheet new not found". If the
   // bootstrap save failed for any reason, leave it to a subsequent reload
@@ -3548,6 +3635,7 @@ const { onGlobalKey } = useShortcuts({
   clipboard, clipboardHas, setMarchingAnts: (v) => grid?.setMarchingAnts(v),
   fillDown, fillRight,
   runSmartFill,
+  readOnly: () => readOnly.value,
 })
 
 // ── Clipboard ─────────────────────────────────────────────────────────────────
@@ -3567,6 +3655,8 @@ function onDocCopy(e) {
 }
 function onDocCut(e) {
   if (!_canvasActive()) return
+  if (readOnly.value) return   // cut deletes cells — viewers may only copy
+
   e.preventDefault()
   const src    = grid.getSelection()
   const sn     = sheet.getCurrentSheet()
@@ -3578,6 +3668,7 @@ function onDocCut(e) {
 }
 async function onDocPaste(e) {
   if (!_canvasActive()) return
+  if (readOnly.value) return   // viewers can't write pasted cells
   e.preventDefault()
   const destSel = grid.getSelection()
   const sn = sheet.getCurrentSheet()
@@ -3596,6 +3687,24 @@ async function onDocPaste(e) {
     return
   }
 
+  // Prefer the HTML flavor when it carries a real table — external apps
+  // (Gameplan, Google Sheets, web pages) put a structured <table> there, while
+  // their text/plain flavor can lack tab delimiters and collapse into a single
+  // column. Read both flavors up front so we can also MEASURE the paste extent
+  // before writing (see below).
+  const html = clipboard.hasData() ? null : e.clipboardData?.getData('text/html')
+  const text = clipboard.hasData() ? null : e.clipboardData?.getData('text/plain')
+
+  // For an external paste there is no internal source selection, so
+  // _pasteAffectedRects only sees the clicked cell — the output block's real
+  // size lives in the clipboard payload. Measure it (side-effect free, same
+  // grid math the write uses) and fold it into the capture rect, or undo would
+  // record only the anchor cell and leave the rest of the block behind.
+  const externalRect = clipboard.hasData()
+    ? null
+    : (clipboard.measureHTMLPaste(html, activeCell.value, destSel)
+       ?? clipboard.measureTextPaste(text, activeCell.value, destSel))
+
   // Snapshot the pre-paste state for cells + formats + validation across
   // the destination rect, plus cond-format rule count for the fallback
   // decision. The cells+formats+validation diff drives op-based undo; if
@@ -3605,6 +3714,7 @@ async function onDocPaste(e) {
   // Capture across everything the paste can touch (dest, full output block,
   // and — for a cut — the vacated source) so undo restores all of it.
   const rects      = _pasteAffectedRects(destSel)
+  if (externalRect) rects.push(externalRect)
   const before     = Object.assign({}, ...rects.map(r => _captureRange(r, sn)))
   const beforeFmt  = Object.assign({}, ...rects.map(r => _captureFormatsRange(r, sn)))
   const beforeVal  = Object.assign({}, ...rects.map(r => _captureValidationRange(r, sn)))
@@ -3616,21 +3726,11 @@ async function onDocPaste(e) {
     // history entry from out here. clipboard still does its mutations.
     clipboard.paste(activeCell.value, () => {}, 'all', destSel)
     pasted = true
-  } else {
-    // Prefer the HTML flavor when it carries a real table — external apps
-    // (Gameplan, Google Sheets, web pages) put a structured <table> there,
-    // while their text/plain flavor can lack tab delimiters and collapse into
-    // a single column. Fall back to tab/newline-delimited plain text.
-    const html = e.clipboardData?.getData('text/html')
-    if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
-      pasted = true
-    } else {
-      const text = e.clipboardData?.getData('text/plain')
-      if (text) {
-        clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
-        pasted = true
-      }
-    }
+  } else if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
+    pasted = true
+  } else if (text) {
+    clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
+    pasted = true
   }
   clipboardHas.value = clipboard.hasData()
   grid.setMarchingAnts(null)
@@ -3980,6 +4080,7 @@ function openValidationDialog() {
   validationDialog.val2     = String(e?.max ?? '')
   validationDialog.listRaw  = (e?.options || []).join(', ')
   validationDialog.message  = e?.message  || ''
+  validationDialog.severity = e?.severity || 'reject'
   validationDialog.open     = true
 }
 
@@ -3987,19 +4088,23 @@ function confirmValidation() {
   const ids = selectionIds()
   const sn  = sheet.getCurrentSheet()
   const msg = validationDialog.message.trim() || undefined
+  // 'warn' only differs from the default when the value fails, and a checkbox
+  // is TRUE/FALSE-only where "allow anyway" makes no sense — so scope it out.
+  const severity = validationDialog.type === 'checkbox' ? undefined
+    : (validationDialog.severity === 'warn' ? 'warn' : undefined)
   let rule
   if (validationDialog.type === 'checkbox') {
     rule = { type: 'checkbox', message: msg }
   } else if (validationDialog.type === 'list') {
     const options = validationDialog.listRaw.split(',').map(s => s.trim()).filter(Boolean)
-    rule = { type: 'list', options, message: msg }
+    rule = { type: 'list', options, message: msg, severity }
   } else {
     const op  = validationDialog.operator
     const v1  = parseFloat(validationDialog.val1)
     const v2  = parseFloat(validationDialog.val2)
     const min = isNaN(v1) ? undefined : v1
     const max = ['between', 'not_between'].includes(op) && !isNaN(v2) ? v2 : undefined
-    rule = { type: validationDialog.type, operator: op, min, max, message: msg }
+    rule = { type: validationDialog.type, operator: op, min, max, message: msg, severity }
   }
   for (const id of ids) validation.set(id, rule, sn)
 
@@ -4315,13 +4420,18 @@ function _detectContiguousBlock(r, c) {
   return { r0, c0, r1, c1 }
 }
 
-// Create a filter on the user's current selection.  Single-cell selection
-// auto-expands to the contiguous data block (or refuses if the cell is empty).
+// Create a filter on the user's current selection.  A selection that spans no
+// data rows — a single cell, or a lone header row like A1:E1 — auto-expands to
+// the contiguous data block around its top-left anchor (or refuses if that
+// anchor is empty). Without this, toggling the filter on just the header row
+// would produce a header-only range (r1 === r0): chevrons appear, but the
+// value list scans zero data rows and comes up empty. A genuine multi-row
+// block is taken verbatim.
 function _createFilterOnSelection() {
   if (!grid) return
   const sel = grid.getSelection()
-  const isSingle = sel.r0 === sel.r1 && sel.c0 === sel.c1
-  const range = isSingle
+  const noDataRows = sel.r0 === sel.r1
+  const range = noDataRows
     ? (_detectContiguousBlock(sel.r0, sel.c0) || { r0: sel.r0, c0: sel.c0, r1: sel.r0, c1: sel.c0 })
     : { r0: sel.r0, c0: sel.c0, r1: sel.r1, c1: sel.c1 }
   sortFilter.setRange(range, sheet.getCurrentSheet())
@@ -5231,6 +5341,15 @@ function toggleShowFormulas() {
   border-radius: 2px;
 }
 
+/* Filter range outline — same neutral chrome as the pivot highlight, drawn
+   around the active filter's rectangle so its extent is visible. pointer-events
+   stays off so the chevron buttons and canvas underneath keep receiving clicks. */
+.sn-filter-range {
+  position: absolute; z-index: 14; pointer-events: none;
+  border: 1.5px solid var(--ink-gray-8);
+  border-radius: 2px;
+}
+
 /* ── Bar 2 · Formula bar ─────────────────────────────────────────────────── */
 
 .sn-formula-bar   { display:flex; align-items:center; height:48px; padding:0 16px; border-bottom:1px solid var(--outline-gray-2); gap:8px; flex-shrink:0; background:var(--surface-white); }
@@ -5260,6 +5379,10 @@ function toggleShowFormulas() {
 
 /* ── Bar 3 · Formatting toolbar ──────────────────────────────────────────── */
 .sn-toolbar { display:flex; align-items:center; gap:2px; height:44px; padding:0 15px; border-bottom:1px solid var(--outline-gray-2); background:var(--surface-white); flex-shrink:0; }
+/* Read-only: dim and make the whole formatting bar inert. pointer-events:none
+   swallows clicks on every control (buttons + dropdowns) without per-button
+   wiring; the reduced opacity is the visual "disabled" cue. */
+.sn-toolbar--readonly { opacity:.45; pointer-events:none; }
 .sn-toolbar :deep(.fui-form-control) { width:auto; }
 .sn-toolbar :deep(select) { min-width:118px; }
 /* Font family dropdown — uses a Button trigger that hugs the short label. */

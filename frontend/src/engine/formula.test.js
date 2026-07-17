@@ -255,6 +255,35 @@ describe('lookup functions', () => {
     const cells = { A1: 'k1', B1: 'k2', C1: 'k3', A2: 'v1', B2: 'v2', C2: 'v3' }
     expect(evalExpr('=HLOOKUP("k2",A1:C2,2,FALSE())', { cells })).toBe('v2')
   })
+  it('XLOOKUP exact match', () => {
+    const cells = { A1: 'k1', A2: 'k2', A3: 'k3', B1: 'v1', B2: 'v2', B3: 'v3' }
+    expect(evalExpr('=XLOOKUP("k2",A1:A3,B1:B3)', { cells })).toBe('v2')
+  })
+  it('XLOOKUP no match returns #N/A by default', () => {
+    const cells = { A1: 'k1', A2: 'k2', B1: 'v1', B2: 'v2' }
+    expect(evalExpr('=XLOOKUP("z",A1:A2,B1:B2)', { cells })).toBe('#N/A')
+  })
+  it('XLOOKUP no match returns if_not_found when given', () => {
+    const cells = { A1: 'k1', A2: 'k2', B1: 'v1', B2: 'v2' }
+    expect(evalExpr('=XLOOKUP("z",A1:A2,B1:B2,"none")', { cells })).toBe('none')
+  })
+  it('XLOOKUP match_mode 1 finds next larger', () => {
+    const cells = { A1: 10, A2: 20, A3: 30, B1: 'low', B2: 'mid', B3: 'hi' }
+    expect(evalExpr('=XLOOKUP(25,A1:A3,B1:B3,"none",1)', { cells })).toBe('hi')
+  })
+  it('XLOOKUP match_mode -1 finds next smaller', () => {
+    const cells = { A1: 10, A2: 20, A3: 30, B1: 'low', B2: 'mid', B3: 'hi' }
+    expect(evalExpr('=XLOOKUP(25,A1:A3,B1:B3,"none",-1)', { cells })).toBe('mid')
+  })
+  it('XLOOKUP does not string-match a non-numeric lookup to the first row', () => {
+    const cells = { A1: 'apple', A2: 'banana', B1: 1, B2: 2 }
+    expect(evalExpr('=XLOOKUP("cherry",A1:A2,B1:B2)', { cells })).toBe('#N/A')
+  })
+  it('XLOOKUP approximate mode ignores a non-numeric lookup (no toNum(0) match)', () => {
+    const cells = { A1: 10, A2: 20, A3: 30, B1: 'low', B2: 'mid', B3: 'hi' }
+    expect(evalExpr('=XLOOKUP("cherry",A1:A3,B1:B3,"none",1)', { cells })).toBe('none')
+    expect(evalExpr('=XLOOKUP("cherry",A1:A3,B1:B3,"none",-1)', { cells })).toBe('none')
+  })
   it('MATCH exact',      () => {
     const cells = { A1: 'a', A2: 'b', A3: 'c' }
     expect(evalExpr('=MATCH("b",A1:A3,0)', { cells })).toBe(2)

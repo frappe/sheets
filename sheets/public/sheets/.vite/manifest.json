@@ -18,7 +18,11 @@
     "name": "vue.runtime.esm-bundler"
   },
   "index.html": {
+<<<<<<< HEAD
     "file": "index.B75HMayz.js",
+=======
+    "file": "index.CkXYmsYo.js",
+>>>>>>> feat/parity-phase0
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -32,7 +36,11 @@
       "node_modules/@sentry/vue/build/esm/index.js"
     ],
     "css": [
+<<<<<<< HEAD
       "index.Dv46zLRA.css"
+=======
+      "index.DbOIACPx.css"
+>>>>>>> feat/parity-phase0
     ],
     "assets": [
       "Inter.var.C9xDBOS3.woff2",
@@ -46,7 +54,11 @@
     "isDynamicEntry": true
   },
   "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue": {
+<<<<<<< HEAD
     "file": "FontColor.DGMebAC9.js",
+=======
+    "file": "FontColor.DD-fNlF4.js",
+>>>>>>> feat/parity-phase0
     "name": "FontColor",
     "src": "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue",
     "isDynamicEntry": true,
@@ -56,7 +68,11 @@
     ]
   },
   "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue": {
+<<<<<<< HEAD
     "file": "InsertIframe.Xz9C9_-P.js",
+=======
+    "file": "InsertIframe.Du2LKe9N.js",
+>>>>>>> feat/parity-phase0
     "name": "InsertIframe",
     "src": "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue",
     "isDynamicEntry": true,
@@ -90,7 +106,11 @@
     "isDynamicEntry": true
   },
   "src/pages/SheetEditor/ChartView.vue": {
+<<<<<<< HEAD
     "file": "ChartView.CWz2oqfg.js",
+=======
+    "file": "ChartView.oKFPrlpb.js",
+>>>>>>> feat/parity-phase0
     "name": "ChartView",
     "src": "src/pages/SheetEditor/ChartView.vue",
     "isDynamicEntry": true,

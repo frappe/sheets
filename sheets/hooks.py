@@ -169,6 +169,9 @@ scheduler_events = {
 		# invariant that any retained snapshot can be expanded into an
 		# op-level activity view.
 		"sheets.versioning.tasks.truncate_op_log",
+		# Permanently erase sheets that have sat in the trash past the
+		# retention window (default 30d, per-site config). See sheets/trash.py.
+		"sheets.trash.purge_trashed_sheets",
 	],
 }
 
