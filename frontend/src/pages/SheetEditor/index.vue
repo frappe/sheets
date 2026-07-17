@@ -3015,7 +3015,7 @@ function _setupGridInstance() {
     isCellEditable: (r, c) => !protection.isProtected(r, c, sheet.getCurrentSheet()),
     onBlockedEdit: () => _flashProtected(sheet.getCurrentSheet()),
     onFill(src, total, { withModifier = false } = {}) {
-      if (_rectBlocked(total)) return
+      if (_fillDestBlocked(src, total)) return   // only the destination cells, not the source
       const series = _previewSeriesKind(src)
       // Cmd/Ctrl held inverts the auto-detected mode — Google Sheets behaviour.
       const mode = withModifier ? (series ? 'copy' : 'series') : 'auto'
@@ -3318,6 +3318,19 @@ function _cellsBlocked(ids, sn = sheet.getCurrentSheet()) {
 function _cellSilentlyProtected(id, sn = sheet.getCurrentSheet()) {
   const p = parseCellId(id)
   return !!(p && protection.isProtected(p.row, p.col, sn))
+}
+// A fill writes only the destination — the strip(s) of `total` outside `src`.
+// Checking the whole extent would wrongly block a fill that merely *starts*
+// from a protected cell (reading a protected source is fine; only writes are
+// guarded). A fill extends in one direction, so at most one strip is non-empty.
+function _fillDestBlocked(src, total, sn = sheet.getCurrentSheet()) {
+  const strips = []
+  if (total.r1 > src.r1) strips.push({ r0: src.r1 + 1, r1: total.r1, c0: total.c0, c1: total.c1 })
+  if (total.r0 < src.r0) strips.push({ r0: total.r0, r1: src.r0 - 1, c0: total.c0, c1: total.c1 })
+  if (total.c1 > src.c1) strips.push({ r0: total.r0, r1: total.r1, c0: src.c1 + 1, c1: total.c1 })
+  if (total.c0 < src.c0) strips.push({ r0: total.r0, r1: total.r1, c0: total.c0, c1: src.c0 - 1 })
+  if (!strips.some(s => protection.isAnyProtected(s, sn))) return false
+  _flashProtected(sn); return true
 }
 
 // ── Protection UI actions ─────────────────────────────────────────────────────
