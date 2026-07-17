@@ -144,6 +144,15 @@ describe('CommentsEngine — shifts, lifecycle, snapshot', () => {
     expect(c2.preview('A1', 'Sheet1')).toBe('x')
   })
 
+  it('restore isolates the live store from the snapshot (in-place edits keep history intact)', () => {
+    c.addReply('A1', reply('one'), 'Sheet1')
+    const snap = c.snapshot()           // deep copy of the store
+    c.restore(snap)                     // navigate back to it
+    c.addReply('A1', reply('two'), 'Sheet1')   // then edit the live thread in place
+    expect(snap.Sheet1.A1.thread).toHaveLength(1)   // the history entry must be untouched
+    expect(c.getThread('A1', 'Sheet1').thread).toHaveLength(2)
+  })
+
   it('duplicate deep-copies threads', () => {
     c.addReply('A1', reply('x'), 'S1')
     c.duplicateSheet('S1', 'S1 copy')

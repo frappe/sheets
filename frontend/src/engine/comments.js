@@ -176,9 +176,13 @@ export function createCommentsEngine() {
   function snapshot() { return deepClone(store) }
 
   // Migrate legacy string notes on load so old saved docs upgrade transparently.
+  // Deep-clone the incoming snapshot first: threads are mutated in place
+  // (addReply/resolve), so aliasing a history entry here would let a later edit
+  // corrupt the stored snapshot and break a subsequent undo/redo.
   function restore(snap) {
     for (const k of Object.keys(store)) delete store[k]
-    for (const [sheet, cells] of Object.entries(snap || {})) {
+    const clone = deepClone(snap || {})
+    for (const [sheet, cells] of Object.entries(clone)) {
       store[sheet] = {}
       for (const [id, v] of Object.entries(cells)) {
         const m = _migrate(v)
