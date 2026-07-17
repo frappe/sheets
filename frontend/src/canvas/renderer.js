@@ -17,7 +17,7 @@ export function createRenderer(ctx, geometry) {
   function render({ cssW, cssH, data, sel, selEnd, selMode = 'cell', editing, getFormat,
                     freeze: frz = { rows: 0, cols: 0 }, getMergeInfo, isSlave,
                     getComment = null, getValidation = null, getCondFormat = null,
-                    getRightInset = null, getDiffFor = null,
+                    getRightInset = null, getDiffFor = null, getSparkline = null,
                     marchAnts = null, marchPhase = 0, pickerRect = null, zoom = 1 }) {
     if (!cssW || !cssH) return
     ctx.save()
@@ -35,7 +35,7 @@ export function createRenderer(ctx, geometry) {
 
     const state = { cssW, cssH, data, getFormat, getMergeInfo, isSlave,
                     getComment, getValidation, getCondFormat, getRightInset,
-                    getDiffFor,
+                    getDiffFor, getSparkline,
                     editing, range, marchAnts, marchPhase, pickerRect }
 
     _renderRegion(r0s, c0s, r1s, c1s, mainX, mainY, cssW - mainX, cssH - mainY, state)
@@ -59,13 +59,13 @@ export function createRenderer(ctx, geometry) {
     if (clipW <= 0 || clipH <= 0 || r1 < r0 || c1 < c0) return
     const { cssW, cssH, data, getFormat, getMergeInfo, isSlave,
             getComment, getValidation, getCondFormat, getRightInset,
-            getDiffFor,
+            getDiffFor, getSparkline,
             editing, range, marchAnts, marchPhase, pickerRect } = state
     ctx.save()
     ctx.beginPath(); ctx.rect(clipX, clipY, clipW, clipH); ctx.clip()
     if (!editing) selPainter.drawSelFill(range)
     gridPainter.drawGridLines(r0, c0, r1, c1, cssW, cssH)
-    cellPainter.drawRegionCells(r0, c0, r1, c1, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor)
+    cellPainter.drawRegionCells(r0, c0, r1, c1, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor, getSparkline)
     cellPainter.drawRegionBorders(r0, c0, r1, c1, getFormat, getMergeInfo, isSlave)
     if (marchAnts)  selPainter.drawMarchingAnts(marchAnts, marchPhase)
     if (pickerRect) selPainter.drawPickerRect(pickerRect)

@@ -122,6 +122,7 @@ export function createSheet({ onCellChanged, onCellsChanged } = {}) {
 		const raw = sheets[sheet]?.[id] ?? ''
 		if (typeof raw === 'string' && raw.startsWith('=')) {
 			const result = _evalFormula(raw.slice(1), sheet, id)
+			if (result?.__spark) return ''   // a sparkline renders as a chart, not text
 			return result === null || result === undefined ? '' : String(result)
 		}
 		return raw === null || raw === undefined ? '' : String(raw)

@@ -3,12 +3,13 @@ import { cellId } from '../../utils/cells.js'
 import { getTextWrap, isWrapText } from '../../utils/text-wrap.js'
 import { CHIP, chipFont, chipColor, chipMetrics } from '../chip-geometry.js'
 import { checkRule } from '../../engine/validation.js'
+import { sparkGeometry } from '../../engine/sparkline.js'
 
 export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
 
   // ── Public API ───────────────────────────────────────────────────────────────
 
-  function drawRegionCells(r0, c0, r1, c1, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor) {
+  function drawRegionCells(r0, c0, r1, c1, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor, getSparkline) {
     ctx.textBaseline = 'middle'
     // Two-pass paint: every cell's background + decorations first, then
     // every cell's text. Splitting the passes means an upstream cell's
@@ -24,7 +25,7 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     for (let r = r0; r <= r1; r++) {
       if (rh(r) === 0) continue
       for (let c = c0; c <= c1; c++)
-        _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation)
+        _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline)
     }
   }
 
@@ -93,10 +94,13 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     if (condFmt?.icon) _drawCellIcon(x, y, h, condFmt.icon)
   }
 
-  function _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation) {
+  function _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline) {
     const g = _cellGeom(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat)
     if (!g) return
     const { id, val, fmt, condFmt, x, y, w, h } = g
+    // A sparkline cell renders a mini chart in place of text.
+    const spark = getSparkline?.(id)
+    if (spark) { _drawSparkline(x, y, w, h, spark); return }
     if (val == null || val === '') return
     // List-validation cells render their value inside the chip drawn in the
     // bg pass — don't paint it a second time on top.
@@ -128,6 +132,32 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
       }
     }
     _drawCellText(drawX, y, drawW, h, s, efmt, rightInset)
+  }
+
+  // Paint a sparkline spec into the cell box. Geometry (points / bars) comes
+  // from the pure sparkline module; here we just stroke/fill it.
+  function _drawSparkline(x, y, w, h, spec) {
+    const geo = sparkGeometry(spec, w, h)
+    if (!geo) return
+    const color = spec.color || COLORS.sparkline
+    ctx.save()
+    ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip()   // dense charts can't spill into neighbours
+    if (geo.kind === 'bars') {
+      ctx.fillStyle = color
+      for (const b of geo.bars) ctx.fillRect(x + b.x, y + b.y, b.w, b.h)
+    } else if (geo.points.length === 1) {
+      const p = geo.points[0]                            // a lone point renders as a dot, not an empty stroke
+      ctx.fillStyle = color
+      ctx.beginPath(); ctx.arc(x + p.x, y + p.y, 1.5, 0, Math.PI * 2); ctx.fill()
+    } else {
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      geo.points.forEach((p, i) => (i ? ctx.lineTo(x + p.x, y + p.y) : ctx.moveTo(x + p.x, y + p.y)))
+      ctx.stroke()
+    }
+    ctx.restore()
   }
 
   // Walk adjacent cells in the alignment direction and return how many CSS

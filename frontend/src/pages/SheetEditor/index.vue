@@ -2915,6 +2915,13 @@ function _setupGridInstance() {
       id, val, sheet.getCurrentSheet(),
       (cid) => sheet.getDisplayValue(cid, sheet.getCurrentSheet()),
     ),
+    // A SPARKLINE formula evaluates to a spec object; the painter draws it.
+    // In show-formulas mode the cell shows its =SPARKLINE(...) text instead.
+    getSparkline: id => {
+      if (showFormulas.value) return null
+      const v = sheet.getCellValue(id, sheet.getCurrentSheet())
+      return (v && v.__spark) ? v : null
+    },
     getRightInset: id => {
       const range = sortFilter.getRange(sheet.getCurrentSheet())
       if (!range) return 0

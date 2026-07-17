@@ -455,6 +455,22 @@ describe('ADDRESS', () => {
 
 // ── Array (newly added) ─────────────────────────────────────────────────────
 
+describe('SPARKLINE', () => {
+  it('returns a spec with the numeric range data, type and color', () => {
+    expect(evalExpr('=SPARKLINE(A1:A3, "column", "#f00")', { cells: { A1: 1, A2: 2, A3: 3 } }))
+      .toEqual({ __spark: true, type: 'column', data: [1, 2, 3], color: '#f00' })
+  })
+  it('defaults to a line chart and drops blank/non-numeric cells', () => {
+    const s = evalExpr('=SPARKLINE(A1:A4)', { cells: { A1: 1, A3: 'x', A4: 4 } })  // A2 empty
+    expect(s.type).toBe('line')
+    expect(s.data).toEqual([1, 4])
+  })
+  it('a spec coerces to empty (not "[object Object]") in string concat', () => {
+    const cells = { A1: '=SPARKLINE(B1:B2)', B1: 1, B2: 2 }
+    expect(evalExpr('=A1&"z"', { cells })).toBe('z')
+  })
+})
+
 describe('array functions', () => {
   it('TRANSPOSE 1D vertical → 1 row × 3 cols', () => {
     // A1:A3 arrives as [[1],[2],[3]] (column vector). Transposed it should be

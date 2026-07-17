@@ -29,6 +29,7 @@ export const COLORS = {
   headerBg:     '#F8F8F8',                  // --surface-menu-bar
   headerText:   '#7C7C7C',                  // --ink-gray-5
   cellText:     '#171717',                  // --ink-gray-9
+  sparkline:    '#0F766E',                  // teal-700 — default in-cell chart stroke/fill
   selFill:      'rgba(23, 23, 23, 0.06)',   // --ink-gray-9 @ 6% — subtle neutral wash
   selBorder:    '#171717',                  // --ink-gray-9
   selHandle:    '#171717',                  // --ink-gray-9
