@@ -1033,15 +1033,16 @@
         <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
                 @mousedown.stop @click="removeSlicer(sl)" />
       </div>
-      <div class="sn-slicer-body">
-        <label class="sn-slicer-row sn-slicer-all">
-          <input type="checkbox" :checked="slicerAllChecked(sl)" @change="toggleSlicerAll(sl)" />
-          <span>(Select all)</span>
-        </label>
-        <label v-for="v in slicerValues(sl)" :key="v" class="sn-slicer-row">
-          <input type="checkbox" :checked="slicerChecked(sl, v)" @change="toggleSlicerValue(sl, v)" />
-          <span class="sn-slicer-val">{{ v === '' ? '(Blanks)' : v }}</span>
-        </label>
+      <div class="sn-slicer-values">
+        <div class="sn-fp-value-row sn-slicer-all-row" @click="toggleSlicerAll(sl)">
+          <Checkbox :modelValue="slicerAllChecked(sl)" @update:modelValue="toggleSlicerAll(sl)" @click.stop />
+          <span class="sn-fp-value-text">Select all</span>
+        </div>
+        <div v-for="v in slicerValues(sl)" :key="v || '__blanks__'"
+             class="sn-fp-value-row" @click="toggleSlicerValue(sl, v)">
+          <Checkbox :modelValue="slicerChecked(sl, v)" @update:modelValue="toggleSlicerValue(sl, v)" @click.stop />
+          <span class="sn-fp-value-text">{{ v === '' ? '(Blanks)' : v }}</span>
+        </div>
       </div>
     </div>
 
@@ -6008,15 +6009,12 @@ function toggleShowFormulas() {
 /* Comment panel */
 .sn-comment-panel  { position:fixed; z-index:8500; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.14); padding:12px; min-width:240px; display:flex; flex-direction:column; gap:8px; }
 
-/* Slicers — floating value-filter controls */
-.sn-slicer      { position:fixed; z-index:8400; width:200px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.14); display:flex; flex-direction:column; overflow:hidden; }
-.sn-slicer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 6px 12px; background:var(--surface-gray-2, #f4f4f4); border-bottom:1px solid var(--outline-gray-modals); cursor:move; user-select:none; }
-.sn-slicer-title{ font-size:12px; font-weight:600; color:var(--ink-gray-8); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.sn-slicer-body { max-height:240px; overflow-y:auto; padding:6px 8px; display:flex; flex-direction:column; gap:2px; }
-.sn-slicer-row  { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-gray-8); padding:2px 4px; border-radius:4px; cursor:pointer; }
-.sn-slicer-row:hover { background:var(--surface-gray-2, #f4f4f4); }
-.sn-slicer-all  { font-weight:600; border-bottom:1px solid var(--outline-gray-1, #ececec); padding-bottom:4px; margin-bottom:2px; }
-.sn-slicer-val  { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Slicers — floating value-filter controls (matches the filter panel shell) */
+.sn-slicer        { position:fixed; z-index:8400; width:220px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 0 1px rgba(0,0,0,.35), 0 6px 8px -4px rgba(0,0,0,.1); padding:10px; display:flex; flex-direction:column; gap:8px; }
+.sn-slicer-head   { display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:move; user-select:none; }
+.sn-slicer-title  { font-size:12px; font-weight:600; letter-spacing:.02em; color:var(--ink-gray-8); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sn-slicer-values { max-height:220px; overflow-y:auto; border:1px solid var(--outline-gray-2); border-radius:8px; padding:4px 0; background:var(--surface-white); }
+.sn-slicer-all-row { font-weight:600; border-bottom:1px solid var(--outline-gray-2); }
 .sn-comment-header { display:flex; align-items:center; justify-content:space-between; }
 .sn-comment-title  { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--ink-gray-7); text-transform:uppercase; }
 .sn-comment-close  { background:none; border:none; cursor:pointer; color:var(--ink-gray-5); font-size:14px; line-height:1; padding:2px 4px; }
