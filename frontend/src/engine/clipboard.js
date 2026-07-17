@@ -3,7 +3,7 @@
 import { colLabel, parseCellId } from '../utils/cells.js'
 import { adjustFormula } from './formula-adjust.js'
 
-export function createClipboard({ sheet, formats, condFormat = null, validation = null }) {
+export function createClipboard({ sheet, formats, condFormat = null, validation = null, protection = null }) {
 	let _data    = null   // { 'dr,dc': rawValue }
 	let _fmts    = null   // { 'dr,dc': formatObj }
 	let _vals    = null   // { 'dr,dc': validationRule | null }
@@ -112,6 +112,13 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		if (!anch) return
 		const sh = sheet.getCurrentSheet()
 		const targets = _resolveTargets(anch, destSel)
+
+		// Block the whole paste if any destination cell is protected — `targets`
+		// is the exact output extent, so a multi-cell block anchored at an
+		// unprotected cell is still caught when it spills into a locked one.
+		if (protection && targets.some(({ r, c }) => protection.isProtected(r, c, sh))) {
+			return { blocked: true }
+		}
 
 		// Two-pass: build the cell-value map first, hand it to batchSetCells in
 		// one shot so the engine does ONE dep-rebuild + ONE bulk notify instead
@@ -239,6 +246,11 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 				}))
 		}
 		const sn = sheet.getCurrentSheet()
+		if (protection && Object.keys(writes).some(id => {
+			const p = parseCellId(id); return p && protection.isProtected(p.row, p.col, sn)
+		})) {
+			return { blocked: true }
+		}
 		if (sheet.batchSetCells) sheet.batchSetCells(writes, sn, { replace: false })
 		else                     for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sn)
 		historyPush?.()   // post-mutate snapshot

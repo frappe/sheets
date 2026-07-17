@@ -9,7 +9,7 @@ import { CHIP, chipMetrics } from './chip-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, isCellEditable, onBlockedEdit } = {}) {
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
 
@@ -626,7 +626,19 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     // last picked rect. It'll clear on next selection move / commit / cancel.
   }
 
+  // True unless the host marks any cell in the rect protected. Guards the two
+  // canvas-owned write paths (opening the editor, and Delete-clear) so a
+  // protected cell can't be edited even before the host handlers run.
+  function _rangeEditable(r0, c0, r1, c1) {
+    if (!isCellEditable) return true
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++)
+        if (!isCellEditable(r, c)) return false
+    return true
+  }
+
   function showEditor(initialValue, mode = 'enter') {
+    if (isCellEditable && !isCellEditable(sel.r, sel.c)) { onBlockedEdit?.(); return }
     editMode = mode
     selEnd = { r: sel.r, c: sel.c }
     const fmt = getFormat ? getFormat(cellId(sel.r, sel.c)) : {}
@@ -1311,6 +1323,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
       const { r0, c0, r1, c1 } = getSelRange()
+      // Bail before touching the local cell cache — otherwise a blocked host
+      // handler would leave the canvas showing empty cells the engine still holds.
+      if (!_rangeEditable(r0, c0, r1, c1)) { onBlockedEdit?.(); return }
       if (r0 === r1 && c0 === c1) {
         onCommit?.(cellId(r, c), '')
       } else {

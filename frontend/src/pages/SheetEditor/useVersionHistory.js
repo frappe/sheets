@@ -20,13 +20,14 @@ function flattenDiff(diff, parse) {
 }
 
 function captureLiveState({ getCurrentTitle, getSheet, getFormats, getMerge,
-                            getComments, getValidation, getCondFormat,
+                            getComments, getValidation, getProtection, getCondFormat,
                             getSortFilter, getGrid }) {
   const sheet      = getSheet()
   const formats    = getFormats()
   const merge      = getMerge()
   const comments   = getComments()
   const validation = getValidation()
+  const protection = getProtection?.()
   const condFormat = getCondFormat()
   const sortFilter = getSortFilter()
   const grid       = getGrid()
@@ -38,6 +39,7 @@ function captureLiveState({ getCurrentTitle, getSheet, getFormats, getMerge,
       merge:      merge?.snapshot(),
       comments:   comments?.snapshot(),
       validation: validation?.snapshot(),
+      protection: protection?.snapshot(),
       condFormat: condFormat?.snapshot(),
       sortFilter: sortFilter?.snapshot(),
       view:       grid?.viewSnapshot?.() ?? null,
@@ -46,7 +48,7 @@ function captureLiveState({ getCurrentTitle, getSheet, getFormats, getMerge,
 }
 
 function applyEngineState(saved, title,
-    { getSheet, getFormats, getMerge, getComments, getValidation,
+    { getSheet, getFormats, getMerge, getComments, getValidation, getProtection,
       getCondFormat, getSortFilter, getGrid, getCurrentTitle,
       repopulateGrid, syncViewMirrors, syncNames, currentTitle }) {
   const sheet      = getSheet()
@@ -54,6 +56,7 @@ function applyEngineState(saved, title,
   const merge      = getMerge()
   const comments   = getComments()
   const validation = getValidation()
+  const protection = getProtection?.()
   const condFormat = getCondFormat()
   const sortFilter = getSortFilter()
   const grid       = getGrid()
@@ -62,6 +65,7 @@ function applyEngineState(saved, title,
   if (saved.merge      && merge?.restore)      merge.restore(saved.merge)
   if (saved.comments   && comments?.restore)   comments.restore(saved.comments)
   if (saved.validation && validation?.restore) validation.restore(saved.validation)
+  if (saved.protection && protection?.restore) protection.restore(saved.protection)
   if (saved.condFormat && condFormat?.restore) condFormat.restore(saved.condFormat)
   if (saved.sortFilter && sortFilter?.restore) sortFilter.restore(saved.sortFilter)
   if (saved.view       && grid?.viewRestore)   grid.viewRestore(saved.view)
@@ -80,6 +84,7 @@ export function useVersionHistory({
   getMerge,
   getComments,
   getValidation,
+  getProtection,
   getCondFormat,
   getSortFilter,
   getGrid,
@@ -107,7 +112,7 @@ export function useVersionHistory({
 
   // Shared engine context forwarded to pure helpers.
   const ctx = {
-    getSheet, getFormats, getMerge, getComments, getValidation,
+    getSheet, getFormats, getMerge, getComments, getValidation, getProtection,
     getCondFormat, getSortFilter, getGrid,
     getCurrentTitle: () => currentTitle.value,
     currentTitle, repopulateGrid, syncViewMirrors, syncNames,

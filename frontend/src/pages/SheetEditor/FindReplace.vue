@@ -35,6 +35,8 @@ import { Button, FormControl } from 'frappe-ui'
 const props = defineProps({
   sheet: { type: Object, required: true },
   grid:  { type: Object, required: true },
+  // (id) => boolean — true when a cell is protected and must not be rewritten.
+  isProtected: { type: Function, default: null },
 })
 const emit = defineEmits(['close', 'navigateTo'])
 
@@ -72,6 +74,7 @@ function findNext() {
 function replaceCurrent() {
   if (matchIndex.value < 0 || !matches.value.length) return
   const id  = matches.value[matchIndex.value]
+  if (props.isProtected?.(id)) { status.value = 'Cell is protected'; return }
   const cur = String(props.sheet.getCell(id))
   const q   = findQuery.value
   props.sheet.setCell(id, cur.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replaceQuery.value))
@@ -82,13 +85,16 @@ function replaceAll() {
   const q = findQuery.value
   if (!q) return
   _buildMatches()
-  let count = 0
+  let count = 0, skipped = 0
   for (const id of matches.value) {
+    if (props.isProtected?.(id)) { skipped++; continue }   // leave protected cells untouched
     const cur = String(props.sheet.getCell(id))
     props.sheet.setCell(id, cur.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), replaceQuery.value))
     count++
   }
-  status.value = `Replaced ${count} cell(s)`
+  status.value = skipped
+    ? `Replaced ${count} cell(s), skipped ${skipped} protected`
+    : `Replaced ${count} cell(s)`
   _buildMatches()
 }
 </script>

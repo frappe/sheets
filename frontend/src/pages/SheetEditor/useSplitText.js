@@ -37,6 +37,7 @@ export function useSplitText({
   syncFlags,
   captureRange,
   diffRefs,
+  blockProtected,   // (rect, sheet) => boolean — true (and flashes) if protected
 }) {
   // Reactive state consumed by SplitTextPopover.vue
   const splitText = reactive({
@@ -202,6 +203,14 @@ export function useSplitText({
       }
     }
     const newRect = { r0: selectionRange.r0, r1: selectionRange.r1, c0: selectionRange.c0, c1: maximumColumn }
+
+    // Refuse if the split (source + rightward overflow) touches a protected
+    // cell. Revert any prior preview and close so nothing is left half-written.
+    if (blockProtected?.(newRect, subSheetName)) {
+      _revertSplitPreview()
+      _closeSplit()
+      return
+    }
 
     // Capture original snapshot once; grow it if a later preview overflows
     // further right than the first one.
