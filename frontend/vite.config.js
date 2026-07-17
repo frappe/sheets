@@ -51,11 +51,22 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': 'http://localhost:8001',
-      '/assets': 'http://localhost:8001',
+      // Proxy frappe / frappe-ui runtime assets to the backend, but let
+      // Vite serve the SPA's own base (which lives under /assets too) so
+      // dev/HMR works — otherwise every app module gets shadowed by the
+      // proxy and forwarded to the backend's built bundle.
+      '/assets': {
+        target: 'http://localhost:8001',
+        bypass: (req) =>
+          req.url.startsWith('/assets/sheets/sheets/') ? req.url : undefined,
+      },
     },
   },
 
   optimizeDeps: {
-    include: ['frappe-ui'],
+    // feather-icons is a CJS dep pulled in transitively by frappe-ui; without
+    // forcing it through Vite's pre-bundler it gets served raw and its ESM
+    // `default` import fails at runtime in dev (works in the Rollup build).
+    include: ['frappe-ui', 'feather-icons'],
   },
 })
