@@ -51,11 +51,25 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': 'http://localhost:8001',
-      '/assets': 'http://localhost:8001',
+      '/assets': {
+        target: 'http://localhost:8001',
+        // The app's own base path (`/assets/sheets/sheets/`) overlaps the
+        // `/assets` prefix Frappe serves backend static files from. In dev,
+        // Vite must serve the app itself under that path — only genuine
+        // backend assets (frappe-ui fonts, other apps) should be proxied —
+        // so skip proxying anything under the SPA's base.
+        bypass: (req) =>
+          req.url.startsWith('/assets/sheets/sheets/') ? req.url : null,
+      },
     },
   },
 
   optimizeDeps: {
-    include: ['frappe-ui'],
+    // frappe-ui ships its components as source and imports feather-icons,
+    // a CommonJS package with no `default` export. Without pre-bundling,
+    // Vite serves the raw CJS module and `import feather from 'feather-icons'`
+    // (in frappe-ui's FeatherIcon.vue) fails at runtime. Pre-bundling lets
+    // esbuild synthesize the default-export interop.
+    include: ['frappe-ui', 'feather-icons'],
   },
 })
