@@ -780,6 +780,7 @@
         <hr class="sn-ctx-sep" />
         <Button variant="ghost" size="sm" iconLeft="layout"         label="Insert pivot table…"   @click="openPivotDialog()" />
         <Button variant="ghost" size="sm" iconLeft="bar-chart-2"    label="Insert chart…"          @click="openChartDialog()" />
+        <Button variant="ghost" size="sm" iconLeft="filter"         label="Insert slicer"          @click="insertSlicer()" />
       </template>
 
     </div>
@@ -1024,6 +1025,26 @@
       </template>
     </Dialog>
 
+    <!-- Slicers — floating value-filter controls bound to a filter column -->
+    <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
+         :style="{ left: sl.x + 'px', top: sl.y + 'px' }">
+      <div class="sn-slicer-head" @mousedown="startSlicerDrag(sl, $event)">
+        <span class="sn-slicer-title">{{ slicerLabel(sl) }}</span>
+        <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
+                @mousedown.stop @click="removeSlicer(sl)" />
+      </div>
+      <div class="sn-slicer-body">
+        <label class="sn-slicer-row sn-slicer-all">
+          <input type="checkbox" :checked="slicerAllChecked(sl)" @change="toggleSlicerAll(sl)" />
+          <span>(Select all)</span>
+        </label>
+        <label v-for="v in slicerValues(sl)" :key="v" class="sn-slicer-row">
+          <input type="checkbox" :checked="slicerChecked(sl, v)" @change="toggleSlicerValue(sl, v)" />
+          <span class="sn-slicer-val">{{ v === '' ? '(Blanks)' : v }}</span>
+        </label>
+      </div>
+    </div>
+
     <!-- Threaded comment panel (floating near cell) -->
     <div v-if="commentPanel.open" class="sn-comment-panel"
          :style="{ left: commentPanel.x + 'px', top: commentPanel.y + 'px' }">
@@ -1209,6 +1230,7 @@ import { formatScope }         from '../../engine/format-scope.js'
 import { createMergeEngine }   from '../../engine/merge.js'
 import { createClipboard }     from '../../engine/clipboard.js'
 import { createSortFilter }    from '../../engine/sortFilter.js'
+import { createSlicerEngine }  from '../../engine/slicers.js'
 import { createCommentsEngine }  from '../../engine/comments.js'
 import { createValidationEngine } from '../../engine/validation.js'
 import { createProtectionEngine } from '../../engine/protection.js'
@@ -1302,6 +1324,7 @@ const sheet = createSheet({
 const formats    = createFormatsEngine()
 const merge      = createMergeEngine()
 const sortFilter = createSortFilter(sheet)
+const slicers    = createSlicerEngine()
 const comments   = createCommentsEngine()
 const validation = createValidationEngine()
 const protection = createProtectionEngine()
@@ -1385,6 +1408,7 @@ const history = createHistory({
       formats:      formats.snapshot(),
       merge:        merge.snapshot(),
       sortFilter:   sortFilter.snapshot(),
+      slicers:      slicers.snapshot(),
       comments:     comments.snapshot(),
       validation:   validation.snapshot(),
       protection:   protection.snapshot(),
@@ -1410,6 +1434,7 @@ const history = createHistory({
     }
     if (snap.merge)       merge.restore(snap.merge)
     if (snap.sortFilter)  sortFilter.restore(snap.sortFilter)
+    if (snap.slicers)     slicers.restore(snap.slicers)
     if (snap.comments)    comments.restore(snap.comments)
     if (snap.validation)  validation.restore(snap.validation)
     if (snap.protection)  protection.restore(snap.protection)
@@ -2352,7 +2377,7 @@ const textWrapDropdownOptions = computed(() => [
 let _sheetTabs = null
 const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
-    sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot,
+    sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, slicers, pivot,
     charts, namedRanges,
     getViewState:   () => _sheetTabs?.viewSnapshot?.() ?? grid?.viewSnapshot?.(),
     applyViewState: (s) => {
@@ -2371,7 +2396,7 @@ const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreat
 const isGuest  = computed(() => (window.frappe?.session?.user || 'Guest') === 'Guest')
 const readOnly = computed(() => !canWrite.value)
 
-_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
+_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter, slicers], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
     _repopulateGrid()
     grid?.setMarchingAnts(null); clipboard.clear(); clipboardHas.value = false
@@ -2482,6 +2507,7 @@ const {
   getProtection:  () => protection,
   getCondFormat:  () => condFormat,
   getSortFilter:  () => sortFilter,
+  getSlicers:     () => slicers,
   getGrid:        () => grid,
   currentTitle,
   switchSheet,
@@ -4690,6 +4716,99 @@ function _removeFilter() {
   isDirty.value = true
 }
 
+// ── Slicers ────────────────────────────────────────────────────────────────
+// A slicer is a floating value-filter control bound to a column of the filter
+// range. It reads/writes that column's `inSet` spec in sortFilter; the slicers
+// engine only tracks the column + float position. `slicerVersion` is bumped on
+// every slicer/filter change so the panels re-derive their checklists.
+const slicerVersion = ref(0)
+let _slicerDrag = null
+
+const activeSlicers = computed(() => { slicerVersion.value; return [...slicers.list(currentSheet.value)] })
+
+function slicerValues(sl) { return sortFilter.getColumnValues(sl.col, sheet.getCurrentSheet()) }
+function slicerLabel(sl) {
+  const range = sortFilter.getRange(sheet.getCurrentSheet())
+  const header = range ? sheet.getDisplayValue(colLabel(sl.col) + (range.r0 + 1), sheet.getCurrentSheet()) : ''
+  return header || colLabel(sl.col)
+}
+// The set of values currently kept visible, or null when the column is unfiltered.
+function _slicerCheckedSet(sl) {
+  const spec = sortFilter.getFilterConfig(sheet.getCurrentSheet())[sl.col]
+  return spec?.operator === 'inSet' ? new Set(spec.values) : null
+}
+function slicerChecked(sl, v) { const set = _slicerCheckedSet(sl); return !set || set.has(v) }
+function slicerAllChecked(sl)  { return !_slicerCheckedSet(sl) }
+function toggleSlicerValue(sl, v) {
+  const all = slicerValues(sl)
+  const set = _slicerCheckedSet(sl) || new Set(all)
+  set.has(v) ? set.delete(v) : set.add(v)
+  _applySlicerFilter(sl, set, all)
+}
+function toggleSlicerAll(sl) {
+  const all = slicerValues(sl)
+  _applySlicerFilter(sl, slicerAllChecked(sl) ? new Set() : new Set(all), all)
+}
+function _applySlicerFilter(sl, set, all) {
+  const sn = sheet.getCurrentSheet()
+  // All-checked is identical to no filter — clear the column instead of storing
+  // every value (mirrors applyFilter).
+  if (set.size === all.length) sortFilter.clearFilter(sl.col, sn)
+  else                         sortFilter.setFilter(sl.col, { operator: 'inSet', values: [...set] }, sn)
+  _repopulateGrid()
+  _applyHiddenRows()
+  history.push()
+  isDirty.value = true
+  slicerVersion.value++
+}
+function insertSlicer() {
+  contextMenu.open = false
+  const sn  = sheet.getCurrentSheet()
+  const p   = parseCellId(activeCell.value)
+  const col = p ? p.col : 0
+  if (slicers.list(sn).some(s => s.col === col)) return   // column already has a slicer
+  // A slicer reads distinct values from the filter range — auto-create one over
+  // the surrounding data block if the sheet isn't filtered yet.
+  if (!sortFilter.getRange(sn)) {
+    const block = _detectContiguousBlock(p?.row ?? 0, col)
+    if (!block) return   // no data to slice
+    sortFilter.setRange(block, sn)
+  }
+  slicers.add(col, 96 + slicers.list(sn).length * 28, 96, sn)
+  _applyHiddenRows()      // paints the filter's chevrons/outline (and bumps slicerVersion)
+  grid?.render?.()
+  history.push()
+  isDirty.value = true
+}
+function removeSlicer(sl) {
+  const sn = sheet.getCurrentSheet()
+  slicers.remove(sl.id, sn)
+  // The slicer IS the filter control for its column — clear the filter it
+  // applied so removing it doesn't strand hidden rows with no visible control.
+  sortFilter.clearFilter(sl.col, sn)
+  _repopulateGrid()
+  _applyHiddenRows()      // un-hides the rows + bumps slicerVersion
+  history.push()
+  isDirty.value = true
+}
+function startSlicerDrag(sl, e) {
+  _slicerDrag = { id: sl.id, sx: e.clientX, sy: e.clientY, ox: sl.x, oy: sl.y }
+  window.addEventListener('mousemove', _onSlicerDrag)
+  window.addEventListener('mouseup', _endSlicerDrag)
+}
+function _onSlicerDrag(e) {
+  if (!_slicerDrag) return
+  const { id, sx, sy, ox, oy } = _slicerDrag
+  slicers.move(id, Math.max(0, ox + e.clientX - sx), Math.max(0, oy + e.clientY - sy), sheet.getCurrentSheet())
+  slicerVersion.value++
+}
+function _endSlicerDrag() {
+  if (_slicerDrag) { history.push(); isDirty.value = true }
+  _slicerDrag = null
+  window.removeEventListener('mousemove', _onSlicerDrag)
+  window.removeEventListener('mouseup', _endSlicerDrag)
+}
+
 function openFilterPanel(colIdx) {
   const sn  = sheet.getCurrentSheet()
   const cfg = sortFilter.getFilterConfig(sn)
@@ -5059,6 +5178,7 @@ function doInsertCol(right = false, count = 1) {
     protection.insertCol(atCol, sn)
     condFormat.insertCol(atCol, sn)
     sortFilter.insertCol(atCol, sn)
+    slicers.insertCol(atCol, sn)
     grid.shiftColWidths(atCol, 1)
   }
   _repopulateGrid()
@@ -5084,6 +5204,7 @@ function doDeleteCol() {
     protection.deleteCol(start, sn)
     condFormat.deleteCol(start, sn)
     sortFilter.deleteCol(start, sn)
+    slicers.deleteCol(start, sn)
     grid.shiftColWidths(start + 1, -1)
   }
   _repopulateGrid()
@@ -5239,6 +5360,9 @@ function _applyHiddenRows() {
   // Tag the filter subset so grid-painter can render those gaps with the
   // regular gridline color instead of the bold "rows hidden here" stroke.
   grid?.setFilterHiddenRows(filterHidden)
+  // The filter state just changed (panel, sort, undo, sheet switch, or a
+  // slicer) — refresh any open slicer's checklist so both controls agree.
+  slicerVersion.value++
 }
 
 function _applyHiddenCols() {
@@ -5883,6 +6007,16 @@ function toggleShowFormulas() {
 
 /* Comment panel */
 .sn-comment-panel  { position:fixed; z-index:8500; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.14); padding:12px; min-width:240px; display:flex; flex-direction:column; gap:8px; }
+
+/* Slicers — floating value-filter controls */
+.sn-slicer      { position:fixed; z-index:8400; width:200px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.14); display:flex; flex-direction:column; overflow:hidden; }
+.sn-slicer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px 6px 12px; background:var(--surface-gray-2, #f4f4f4); border-bottom:1px solid var(--outline-gray-modals); cursor:move; user-select:none; }
+.sn-slicer-title{ font-size:12px; font-weight:600; color:var(--ink-gray-8); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sn-slicer-body { max-height:240px; overflow-y:auto; padding:6px 8px; display:flex; flex-direction:column; gap:2px; }
+.sn-slicer-row  { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-gray-8); padding:2px 4px; border-radius:4px; cursor:pointer; }
+.sn-slicer-row:hover { background:var(--surface-gray-2, #f4f4f4); }
+.sn-slicer-all  { font-weight:600; border-bottom:1px solid var(--outline-gray-1, #ececec); padding-bottom:4px; margin-bottom:2px; }
+.sn-slicer-val  { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .sn-comment-header { display:flex; align-items:center; justify-content:space-between; }
 .sn-comment-title  { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--ink-gray-7); text-transform:uppercase; }
 .sn-comment-close  { background:none; border:none; cursor:pointer; color:var(--ink-gray-5); font-size:14px; line-height:1; padding:2px 4px; }
