@@ -36,6 +36,14 @@ export function createSlicerEngine() {
     if (sl) { sl.x = x; sl.y = y }
   }
 
+  // Re-point a slicer at a different column (unless one already targets it).
+  function setCol(id, col, sheet = 'Sheet1') {
+    const s = store[sheet]
+    if (!s || s.some(sl => sl.col === col && sl.id !== id)) return
+    const sl = s.find(x => x.id === id)
+    if (sl) sl.col = col
+  }
+
   // ── Structural column shifts (a slicer follows its column) ────────────────────
   function insertCol(atCol, sheet = 'Sheet1') {
     for (const sl of store[sheet] || []) if (sl.col >= atCol) sl.col += 1
@@ -68,7 +76,7 @@ export function createSlicerEngine() {
   }
 
   return {
-    list, get, add, remove, move,
+    list, get, add, remove, move, setCol,
     insertCol, deleteCol,
     renameSheet, duplicateSheet, deleteSheet,
     snapshot, restore,

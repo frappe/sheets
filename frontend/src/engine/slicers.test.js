@@ -30,6 +30,20 @@ describe('SlicerEngine', () => {
     expect(s.list('S2')).toEqual([])
   })
 
+  describe('setCol', () => {
+    it('re-points a slicer at another column', () => {
+      const id = s.add(1, 0, 0, 'S')
+      s.setCol(id, 4, 'S')
+      expect(s.get(id, 'S').col).toBe(4)
+    })
+    it('refuses to move onto a column another slicer already owns', () => {
+      const a = s.add(1, 0, 0, 'S')
+      s.add(3, 0, 0, 'S')
+      s.setCol(a, 3, 'S')
+      expect(s.get(a, 'S').col).toBe(1)   // unchanged — col 3 is taken
+    })
+  })
+
   describe('column shifts', () => {
     it('insertCol shifts slicers at/after the insertion right', () => {
       s.add(3, 0, 0, 'S')

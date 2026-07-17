@@ -1029,15 +1029,19 @@
     <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
          :style="{ left: sl.x + 'px', top: sl.y + 'px' }">
       <div class="sn-slicer-head" @mousedown="startSlicerDrag(sl, $event)">
-        <span class="sn-slicer-title">{{ sl.label }}</span>
+        <FormControl type="select" size="sm" class="sn-slicer-colsel"
+                     :modelValue="String(sl.col)" :options="sl.options"
+                     @update:modelValue="changeSlicerColumn(sl, $event)"
+                     @mousedown.stop @click.stop />
         <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
                 @mousedown.stop @click="removeSlicer(sl)" />
       </div>
+      <div class="sn-slicer-actions" @mousedown.stop>
+        <button type="button" class="sn-slicer-link" @click="selectAllSlicer(sl)">Select all</button>
+        <span class="sn-slicer-link-sep">·</span>
+        <button type="button" class="sn-slicer-link" :disabled="!sl.filtered" @click="clearSlicerValues(sl)">Clear</button>
+      </div>
       <div class="sn-slicer-values">
-        <div class="sn-fp-value-row sn-slicer-all-row" @click="toggleSlicerAll(sl)">
-          <Checkbox :modelValue="sl.allChecked" @update:modelValue="toggleSlicerAll(sl)" @click.stop />
-          <span class="sn-fp-value-text">Select all</span>
-        </div>
         <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
              class="sn-fp-value-row" @click="toggleSlicerValue(sl, row.v)">
           <Checkbox :modelValue="row.checked" @update:modelValue="toggleSlicerValue(sl, row.v)" @click.stop />
@@ -4725,13 +4729,16 @@ function _removeFilter() {
 const slicerVersion = ref(0)
 let _slicerDrag = null
 
-// One reactive snapshot per slicer: values + PLAIN boolean checked flags, all
-// derived together on each slicerVersion bump. The template binds the checkboxes
-// to these booleans (not to function calls over the non-reactive sortFilter
-// engine), so "Select all" and the value rows can never disagree.
+// One reactive snapshot per slicer: the column picker's options, the value list
+// with PLAIN boolean checked flags, and whether a filter is active — all derived
+// together on each slicerVersion bump. The template binds to these plain values
+// (not to function calls over the non-reactive sortFilter engine), so the panel
+// can never drift out of sync with the applied filter.
 const activeSlicers = computed(() => {
   slicerVersion.value
-  const sn = currentSheet.value
+  const sn      = currentSheet.value
+  const range   = sortFilter.getRange(sn)
+  const options = range ? _slicerColumnOptions(range, sn) : []
   return slicers.list(sn).map(sl => {
     const values = sortFilter.getColumnValues(sl.col, sn)
     const spec   = sortFilter.getFilterConfig(sn)[sl.col]
@@ -4739,11 +4746,23 @@ const activeSlicers = computed(() => {
     return {
       id: sl.id, col: sl.col, x: sl.x, y: sl.y,
       label: slicerLabel(sl, sn),
-      allChecked: !set,
+      options,
+      filtered: !!set,   // drives the Clear button's enabled state
       rows: values.map(v => ({ v, checked: !set || set.has(v) })),
     }
   })
 })
+
+// Every column of the filter range, as { label: header, value: 'colIdx' } for
+// the header dropdown. Values are strings — FormControl selects emit strings.
+function _slicerColumnOptions(range, sn) {
+  const opts = []
+  for (let c = range.c0; c <= range.c1; c++) {
+    const header = sheet.getDisplayValue(colLabel(c) + (range.r0 + 1), sn)
+    opts.push({ label: header || colLabel(c), value: String(c) })
+  }
+  return opts
+}
 
 function slicerValues(sl) { return sortFilter.getColumnValues(sl.col, sheet.getCurrentSheet()) }
 function slicerLabel(sl, sn = sheet.getCurrentSheet()) {
@@ -4762,11 +4781,32 @@ function toggleSlicerValue(sl, v) {
   set.has(v) ? set.delete(v) : set.add(v)
   _applySlicerFilter(sl, set, all)
 }
-function toggleSlicerAll(sl) {
-  const all = slicerValues(sl)
-  // sl.allChecked is the live snapshot from activeSlicers — checked → clear to
-  // none, unchecked → select all (clears the filter).
-  _applySlicerFilter(sl, sl.allChecked ? new Set() : new Set(all), all)
+// "Select all" always shows everything — it clears the column's filter outright
+// rather than toggling, so it can never surprise-hide the data.
+function selectAllSlicer(sl) {
+  const sn = sheet.getCurrentSheet()
+  sortFilter.clearFilter(sl.col, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
+}
+// "Clear" empties the selection (an inSet with no values) so the user can then
+// pick just the values they want — the Google-Sheets filter idiom.
+function clearSlicerValues(sl) {
+  const sn = sheet.getCurrentSheet()
+  sortFilter.setFilter(sl.col, { operator: 'inSet', values: [] }, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
+}
+// Re-point a slicer at a different column of the filter range; the old column's
+// filter is released so it stops hiding rows with no visible control.
+function changeSlicerColumn(sl, value) {
+  const sn     = sheet.getCurrentSheet()
+  const newCol = Number(value)
+  if (Number.isNaN(newCol) || newCol === sl.col) return
+  // Bail before touching anything if another slicer already owns the target —
+  // otherwise we'd clear this column's filter for a move that can't happen.
+  if (slicers.list(sn).some(s => s.col === newCol && s.id !== sl.id)) return
+  sortFilter.clearFilter(sl.col, sn)
+  slicers.setCol(sl.id, newCol, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
 }
 function _applySlicerFilter(sl, set, all) {
   const sn = sheet.getCurrentSheet()
@@ -6029,10 +6069,15 @@ function toggleShowFormulas() {
 
 /* Slicers — floating value-filter controls (matches the filter panel shell) */
 .sn-slicer        { position:fixed; z-index:8400; width:220px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 0 1px rgba(0,0,0,.35), 0 6px 8px -4px rgba(0,0,0,.1); padding:10px; display:flex; flex-direction:column; gap:8px; }
-.sn-slicer-head   { display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:move; user-select:none; }
-.sn-slicer-title  { font-size:12px; font-weight:600; letter-spacing:.02em; color:var(--ink-gray-8); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sn-slicer-head   { display:flex; align-items:center; gap:6px; cursor:move; user-select:none; }
+.sn-slicer-colsel { flex:1 1 auto; min-width:0; cursor:pointer; }
+.sn-slicer-colsel :deep(select) { font-weight:600; }
+.sn-slicer-actions { display:flex; align-items:center; gap:6px; padding:0 2px; }
+.sn-slicer-link   { font-size:11px; font-weight:500; color:var(--ink-blue-500, #2563eb); background:none; border:0; padding:0; cursor:pointer; }
+.sn-slicer-link:hover:not(:disabled) { text-decoration:underline; }
+.sn-slicer-link:disabled { color:var(--ink-gray-4); cursor:default; }
+.sn-slicer-link-sep { color:var(--ink-gray-4); font-size:11px; }
 .sn-slicer-values { max-height:220px; overflow-y:auto; border:1px solid var(--outline-gray-2); border-radius:8px; padding:4px 0; background:var(--surface-white); }
-.sn-slicer-all-row { font-weight:600; border-bottom:1px solid var(--outline-gray-2); }
 .sn-comment-header { display:flex; align-items:center; justify-content:space-between; }
 .sn-comment-title  { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--ink-gray-7); text-transform:uppercase; }
 .sn-comment-close  { background:none; border:none; cursor:pointer; color:var(--ink-gray-5); font-size:14px; line-height:1; padding:2px 4px; }
