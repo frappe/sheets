@@ -81,6 +81,14 @@
             <template #prefix><FeatherIcon name="eye" class="h-3.5 w-3.5" /></template>
           </Badge>
         </Tooltip>
+        <!-- Public indicator for the owner/editors — surfaces that the sheet
+             is exposed via a public link (the missing transparency signal). -->
+        <Badge
+          v-else-if="isPublic"
+          theme="blue" variant="subtle" size="sm"
+          label="Public"
+          tooltip="Anyone with the link can view this sheet"
+        />
         <Badge v-if="protectionNotice" theme="gray" variant="subtle" size="sm" :label="protectionNotice" :tooltip="protectionNotice" />
       </div>
       <div class="sn-topbar-right">
@@ -144,8 +152,10 @@
             :title="`${presentUsers.length - 3} more people`"
           >+{{ presentUsers.length - 3 }}</span>
         </div>
-        <!-- Share -->
+        <!-- Share — hidden for read-only viewers (guests can't grant access,
+             and get_sheet_shares would 403 for them anyway). -->
         <Button
+          v-if="!readOnly"
           variant="ghost"
           size="sm"
           icon="share-2"
@@ -153,7 +163,7 @@
           tooltip="Share this sheet"
           @click="shareOpen = true"
         />
-        <span class="sn-topbar-divider" aria-hidden="true" />
+        <span v-if="!readOnly" class="sn-topbar-divider" aria-hidden="true" />
         <Avatar
           :label="userInitial"
           :image="userImage || undefined"
@@ -811,7 +821,9 @@
       :sheet-id="props.id"
       :sheet-title="currentTitle"
       :owner-id="userEmail"
+      :is-public="isPublic"
       @shares-changed="shareCount = $event"
+      @public-changed="isPublic = $event"
     />
 
     <!-- AI Assist settings (in-app, never the desk form) -->
@@ -2338,7 +2350,7 @@ const textWrapDropdownOptions = computed(() => [
 // fallbacks only cover the impossible window where someone saves before
 // useSheetTabs has finished initializing.
 let _sheetTabs = null
-const { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
+const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
     sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot,
     charts, namedRanges,
@@ -2351,10 +2363,12 @@ const { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExi
   })
 
 // View-only mode: the loaded sheet is shared with the current user at read
-// (not write) permission. Everything that mutates the doc keys off this — the
-// grid edit gate, the toolbar/formula-bar disable, the context menu, and the
-// autosave path all no-op so a viewer is never misled into editing a doc they
-// can't persist (and never triggers the server's PermissionError on save).
+// (not write) permission, or the caller is a guest on a public link. Everything
+// that mutates the doc keys off this — the grid edit gate, the toolbar/formula-
+// bar disable, the context menu, and the autosave path all no-op so a viewer is
+// never misled into editing a doc they can't persist (and never triggers the
+// server's PermissionError on save).
+const isGuest  = computed(() => (window.frappe?.session?.user || 'Guest') === 'Guest')
 const readOnly = computed(() => !canWrite.value)
 
 _sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
@@ -2441,6 +2455,10 @@ const { presentUsers, remoteCursors, broadcastCellChange, broadcastBatchChange, 
     currentSheet,
     getSheet:       () => sheet,
     repopulateGrid: _repopulateGrid,
+    // Guests viewing a public link don't collaborate — the collab server
+    // rejects the Guest session anyway, so skip the doomed socket and just
+    // show the static snapshot loaded by get_sheet.
+    canCollaborate: computed(() => !isGuest.value),
   })
 // Wire the binding's per-segment touch-tracking into the history we declared
 // up top — undo() will now revert only this client's writes from the undone
@@ -3183,6 +3201,7 @@ function _setupGridInstance() {
     isCellEditable: (r, c) => !protection.isProtected(r, c, sheet.getCurrentSheet()),
     onBlockedEdit: () => _flashProtected(sheet.getCurrentSheet()),
     onFill(src, total, { withModifier = false } = {}) {
+      if (readOnly.value) return   // viewer: drag-fill disabled
       if (_fillDestBlocked(src, total)) return   // only the destination cells, not the source
       const series = _previewSeriesKind(src)
       // Cmd/Ctrl held inverts the auto-detected mode — Google Sheets behaviour.
@@ -3214,12 +3233,19 @@ function _setupGridInstance() {
     lazyValues: _lazyValuesEnabled(),
     // Gate every in-canvas mutation (begin-edit, delete, fill, resize,
     // checkbox/dropdown) on write permission. Read-only viewers keep
-    // selection, navigation and copy.
+    // selection, navigation and copy. `canWrite` resolves async (after
+    // get_sheet), so the watch below keeps the grid in sync once it lands.
     canEdit: () => !readOnly.value,
+    readOnly: readOnly.value,
   })
   // Keep DOM overlays (filter chevrons) in sync with canvas scroll/resize/freeze.
   grid.onRender(() => { renderVersion.value++ })
 }
+
+// `canWrite` arrives after the first get_sheet, so the grid may have been
+// created editable; flip it to viewer the moment we learn the caller is
+// read-only (and back, e.g. if an owner regains write on reload).
+watch(readOnly, (ro) => grid?.setReadOnly?.(ro))
 
 function _setupEventListeners() {
   canvasRef.value.addEventListener('contextmenu', _onCanvasContextMenu)
@@ -3604,11 +3630,16 @@ function _truncatedSummary(op) {
 }
 
 function _triggerAutoSave() {
+  // Read-only viewers (guests / view-only sharees) never persist. The server
+  // rejects their writes anyway; bailing here avoids surfacing a "couldn't
+  // save" chip for edits they were never allowed to make.
+  if (readOnly.value) return
   clearTimeout(_autoSaveTimer)
   _autoSaveTimer = setTimeout(_doAutoSave, 2000)
 }
 
 async function _doAutoSave() {
+  if (readOnly.value) return
   if (!isDirty.value) return
   // Backstop: a viewer should never reach save_sheet (which would throw
   // PermissionError). The input layer already blocks their edits, so isDirty

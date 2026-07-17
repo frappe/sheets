@@ -9,14 +9,17 @@ import { packSheet, packSheetChunked, unpackSheet, boundsOf } from '../../utils/
 export function usePersistence({ sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot, charts, namedRanges, getViewState, applyViewState, currentTitle, emit }) {
   const isSaving  = ref(false)
   const saveError = ref('')
-  // Write permission for the currently-loaded sheet, from get_sheet's `can_write`.
-  // Defaults to true so a brand-new (autoCreate) doc — which the creator always
-  // owns — never flashes read-only before the first load resolves.
-  const canWrite  = ref(true)
   // Surfaces "couldn't open this sheet" cases (404 / 403 / network) to the
   // editor so it can render a proper error screen instead of mounting a
   // blank canvas. Shape: { kind: 'denied' | 'missing' | 'other', message }.
   const loadError = ref(null)
+  // Access flags from get_sheet. `canWrite` drives the editor's read-only
+  // mode (false for guests and view-only viewers); `isPublic` powers the
+  // "Public" indicator + the share dialog's public-link toggle. Default
+  // canWrite=true so a brand-new ('new') sheet — which the owner is creating —
+  // is editable before its first load resolves.
+  const canWrite = ref(true)
+  const isPublic = ref(false)
 
   async function loadSheet(name) {
     loadError.value = null
@@ -41,9 +44,12 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
       if (saved.charts     && charts?.restore)     charts.restore(saved.charts)
       if (saved.namedRanges && namedRanges?.restore) namedRanges.restore(saved.namedRanges)
       currentTitle.value = doc.title
-      // Older backends predate `can_write`; treat its absence as writable so we
-      // never lock out an editor on a stale server.
+      // get_sheet reports whether this caller may write and whether the sheet
+      // is publicly linked. Older backends predate `can_write`; treat its
+      // absence as writable so we never lock out an editor on a stale server.
+      // A guest / view-only sharee gets can_write=false → editor renders read-only.
       canWrite.value = doc.can_write !== false
+      isPublic.value = !!doc.is_public
     } catch (err) {
       console.error('Load failed:', err)
       const t = err?.excType || ''
@@ -173,5 +179,5 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
     }
   }
 
-  return { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave }
+  return { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave }
 }

@@ -33,6 +33,9 @@ export function useShortcuts(actions) {
     clipboard, clipboardHas, setMarchingAnts,
     fillDown, fillRight,
     runSmartFill,
+    // Optional getter — true for a view-only viewer (guest / read-only share).
+    // When set, shortcuts that would mutate the sheet are swallowed; pure
+    // navigation / view shortcuts (find, zoom, formula-peek, escape) stay live.
     readOnly = () => false,
   } = actions
 
@@ -42,6 +45,9 @@ export function useShortcuts(actions) {
   }
 
   function _handleFormatKeys(e, mod, inInput) {
+    // Viewer: undo/redo/format/repeat all mutate — swallow them so a stray
+    // Cmd+B doesn't paint local-only changes the viewer can never save.
+    if (readOnly()) return false
     if (mod && e.key === 'z' && !e.shiftKey)                              { e.preventDefault(); undo();                         return true }
     if (mod && (e.key === 'y' || (e.shiftKey && e.key === 'z')))          { e.preventDefault(); redo();                         return true }
     if (mod && e.key === 'b' && !inInput)                                  { e.preventDefault(); toggleFmt('bold');              return true }

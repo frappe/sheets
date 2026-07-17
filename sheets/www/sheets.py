@@ -52,8 +52,27 @@ def _asset_paths() -> dict:
     }
 
 
+def _guest_may_view(sheet_id) -> bool:
+    """True only when `sheet_id` names an existing, public sheet.
+
+    Kept defensive: a missing id, an unknown name, or any DB hiccup means
+    "no" — a guest never renders the shell unless the link is genuinely public.
+    """
+    if not sheet_id:
+        return False
+    try:
+        return bool(frappe.db.get_value("Sheet", sheet_id, "is_public"))
+    except Exception:
+        return False
+
+
 def get_context(context):
-    if frappe.session.user == "Guest":
+    if frappe.session.user == "Guest" and not _guest_may_view(frappe.form_dict.get("id")):
+        # A logged-out visitor only gets in for a public sheet they opened by
+        # link (`/sheets?id=<name>`). Everything else — the Home list, private
+        # sheets, a bare `/sheets` — still bounces to login. The actual content
+        # gate lives in `api.get_sheet` (it re-checks `is_public`); this is just
+        # so the SPA shell renders instead of redirecting.
         frappe.local.flags.redirect_location = "/login?redirect-to=/sheets"
         raise frappe.Redirect
 

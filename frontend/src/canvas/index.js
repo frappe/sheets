@@ -10,7 +10,11 @@ import { checkboxRect } from './checkbox-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true, isCellEditable, onBlockedEdit } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true, isCellEditable, onBlockedEdit, readOnly = false } = {}) {
+  // When true, the grid is a viewer: the in-cell editor never opens, so no
+  // keystroke / F2 / double-click can mutate a cell. Selection, scrolling and
+  // copy still work. Toggled at runtime via setReadOnly (public link viewers).
+  let _readOnly = readOnly
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
 
@@ -692,6 +696,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     // so blocking it here keeps a viewer from typing into a cell that can't be
     // saved. Selection/navigation still work.
     if (!canEdit()) return
+    if (_readOnly) return   // public-link viewer: editing is disabled
     // Cell-level protection: a protected cell blocks the edit and notifies.
     if (isCellEditable && !isCellEditable(sel.r, sel.c)) { onBlockedEdit?.(); return }
     editMode = mode
@@ -1395,6 +1400,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if (e.key === 'F2') { e.preventDefault(); showEditor(getValue(cellId(r, c)) ?? '', 'edit'); return }
 
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
+      if (_readOnly) return   // viewer: clearing cells is disabled
       e.preventDefault()
       if (!canEdit()) return
       const { r0, c0, r1, c1 } = getSelRange()
@@ -1698,6 +1704,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     setZoom, getZoom,
     viewSnapshot, viewRestore,
     setLazyValues, isLazyValues,
+    setReadOnly: (v) => { _readOnly = !!v },
     destroy,
   }
 }

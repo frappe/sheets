@@ -128,7 +128,17 @@
           <!-- Card footer -->
           <div class="home-card-footer">
             <div class="home-card-info">
-              <span class="home-card-title">{{ sheet.title }}</span>
+              <span class="home-card-title">
+                {{ sheet.title }}
+                <!-- Globe = this sheet is exposed via a public link. Surfaces
+                     the exposure on the owner's own list (transparency). -->
+                <FeatherIcon
+                  v-if="sheet.is_public"
+                  name="globe"
+                  class="home-public-icon"
+                  title="Anyone with the link can view"
+                />
+              </span>
               <span class="home-card-date">
                 <template v-if="!isOwnedByMe(sheet)">Shared · </template>{{ formatDate(sheet.modified) }}
               </span>
@@ -170,6 +180,16 @@
                 />
               </template>
             </Dropdown>
+          </div>
+          <div v-else-if="column.key === 'title'" class="flex items-center gap-1.5 min-w-0">
+            <ListRowItem :column="column" :row="row" :item="item" :align="column.align" />
+            <!-- Public-link indicator, mirrors the grid card's globe. -->
+            <FeatherIcon
+              v-if="row.is_public"
+              name="globe"
+              class="home-public-icon"
+              title="Anyone with the link can view"
+            />
           </div>
           <ListRowItem
             v-else
@@ -603,6 +623,15 @@ async function duplicate(sheet) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Public-link indicator on a sheet card — small, muted, inline with the title. */
+.home-public-icon {
+  width: 12px;
+  height: 12px;
+  margin-left: 4px;
+  color: var(--ink-gray-5);
+  vertical-align: -1px;
 }
 
 .home-card-date {

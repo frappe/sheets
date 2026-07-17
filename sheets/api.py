@@ -128,19 +128,19 @@ _YJS_WRITE_EVENTS = frozenset({"yjs_update", "yjs_state"})
 
 @frappe.whitelist()
 def get_sheet_shares(name: str) -> list:
-	"""Return users who have explicit share access to this sheet."""
+	"""Return users who have explicit per-user share access to this sheet.
+
+	Org-wide / public access is no longer a DocShare row — it lives on the
+	Sheet's `is_public` flag (see `set_sheet_public`). The dialog reads that
+	separately, so we only return named members here.
+	"""
 	frappe.has_permission("Sheet", doc=name, throw=True)
 	rows = frappe.get_all(
 		"DocShare",
-		filters={"share_doctype": "Sheet", "share_name": name},
-		fields=["user", "read", "write", "share", "everyone"],
+		filters={"share_doctype": "Sheet", "share_name": name, "everyone": 0},
+		fields=["user", "read", "write", "share"],
 	)
 	for row in rows:
-		if row.get("everyone"):
-			row["full_name"] = ""
-			row["initials"] = ""
-			row["user_image"] = ""
-			continue
 		identity = _user_identity(row["user"])
 		row.update(identity)
 		row["user_image"] = frappe.db.get_value("User", row["user"], "user_image") or ""
@@ -148,19 +148,26 @@ def get_sheet_shares(name: str) -> list:
 
 
 @frappe.whitelist()
-def share_sheet(name: str, user: str = "", write: int = 0, everyone: int = 0) -> dict:
+def set_sheet_public(name: str, public: int = 0) -> dict:
+	"""Toggle the public, view-only link for a sheet.
+
+	Public access is a single boolean on the Sheet — `is_public`. When on,
+	anyone with the link can open the sheet read-only (no login required, see
+	`get_sheet`'s `allow_guest`). It is deliberately view-only: there is no
+	public-edit. Gated by `ptype="share"` so only the owner (or someone the
+	owner granted the share right) can expose a sheet.
+	"""
+	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
+	frappe.db.set_value("Sheet", name, "is_public", 1 if int(public or 0) else 0)
+	return {"status": "ok", "is_public": bool(int(public or 0))}
+
+
+@frappe.whitelist()
+def share_sheet(name: str, user: str = "", write: int = 0) -> dict:
 	# `ptype="share"` — only users who themselves hold the share right
 	# may grant access to others. Default `read` was too permissive
 	# (any viewer could re-share a sheet to anyone).
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
-	if int(everyone or 0):
-		# "Accessible to all" → single DocShare with everyone=1, user=NULL.
-		# notify=False because there's no individual to email.
-		frappe.share.add(
-			"Sheet", name, user=None, write=int(write), share=0,
-			everyone=1, notify=False,
-		)
-		return {"status": "ok"}
 	# Reject disabled users (and non-existent ones) up front — silently
 	# carrying a share to an account that's been turned off lets it light
 	# up again the moment the account is re-enabled, which is rarely what
@@ -248,18 +255,8 @@ def _notify_sheet_shared(sheet_name: str, recipient: str, can_edit: bool) -> Non
 
 
 @frappe.whitelist()
-def unshare_sheet(name: str, user: str = "", everyone: int = 0) -> dict:
+def unshare_sheet(name: str, user: str = "") -> dict:
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
-	if int(everyone or 0):
-		# frappe.share.remove() looks up by user; for the everyone row we
-		# locate the DocShare directly and delete it.
-		share_name = frappe.db.get_value(
-			"DocShare",
-			{"share_doctype": "Sheet", "share_name": name, "everyone": 1},
-		)
-		if share_name:
-			frappe.delete_doc("DocShare", share_name, ignore_permissions=True)
-		return {"status": "ok"}
 	frappe.share.remove("Sheet", name, user)
 	return {"status": "ok"}
 
@@ -277,21 +274,27 @@ def list_sheets() -> list:
 	rows = frappe.get_list(
 		"Sheet",
 		filters={"trashed": 0},
-		fields=["name", "title", "modified", "owner"],
+		fields=["name", "title", "modified", "owner", "is_public"],
 		order_by="modified desc",
 		limit=100,
 	)
 	for r in rows:
 		r["is_owner"] = (r["owner"] == me)
+		r["is_public"] = bool(r.get("is_public"))
 	return rows
 
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_sheet(name: str, compressed: int = 0) -> dict:
-	# `frappe.get_doc` does NOT check read permission by itself — without
-	# this guard, any logged-in user who knows a sheet id could exfiltrate
-	# its contents.
-	frappe.has_permission("Sheet", doc=name, throw=True)
+	# `allow_guest=True` powers the public-link feature: a logged-out viewer
+	# can open a sheet whose owner flipped `is_public`. We gate carefully so
+	# nothing else leaks — `is_public` is read FIRST, and only public sheets
+	# skip the permission check. Private sheets keep the exact old behaviour:
+	# `frappe.get_doc` does NOT check read permission by itself, so without
+	# this guard any caller who knows a sheet id could exfiltrate its contents.
+	is_public = bool(frappe.db.get_value("Sheet", name, "is_public"))
+	if not is_public:
+		frappe.has_permission("Sheet", doc=name, throw=True)
 	doc = frappe.get_doc("Sheet", name)
 	# A trashed sheet must not open from a bookmarked/shared ?id= link — it's
 	# "deleted" as far as the app is concerned until restored.
@@ -305,11 +308,17 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 	# explicit write flag so the editor can render read-only (dim the toolbar,
 	# lock the grid, hide the save path) instead of letting a viewer type into a
 	# doc they can't persist and only discovering it when save_sheet throws.
+	# Guests and public viewers are always view-only; logged-in users get their
+	# real write right. Public access is view-only by design — no public-edit.
+	can_write = frappe.session.user != "Guest" and bool(
+		frappe.has_permission("Sheet", doc=name, ptype="write", throw=False)
+	)
 	return {
 		"name": doc.name,
 		"title": doc.title,
-		"can_write": bool(frappe.has_permission("Sheet", doc=name, ptype="write", throw=False)),
 		"sheets_data": raw if frappe.utils.cint(compressed) else decode_sheets_data(raw),
+		"is_public": is_public,
+		"can_write": can_write,
 	}
 
 

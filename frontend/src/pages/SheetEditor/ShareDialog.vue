@@ -20,27 +20,24 @@
             <Button
               variant="outline"
               size="sm"
-              :iconLeft="generalAccess === 'all' ? 'globe' : 'lock'"
+              :iconLeft="generalAccess === 'public' ? 'globe' : 'lock'"
               iconRight="chevron-down"
-              :label="generalAccess === 'all' ? 'Accessible to all' : 'Restricted'"
+              :label="generalAccess === 'public' ? 'Anyone with the link' : 'Restricted'"
               class="sd-pill-btn"
             />
           </template>
         </Dropdown>
 
-        <Dropdown v-if="generalAccess === 'all'" :options="generalRoleOpts" placement="bottom-end">
-          <template #default>
-            <Button
-              variant="outline"
-              size="sm"
-              icon-left="eye"
-              icon-right="chevron-down"
-              :label="generalRole === '1' ? 'Can edit' : 'Can view'"
-              class="sd-pill-btn"
-            />
-          </template>
-        </Dropdown>
+        <!-- Public is deliberately view-only — no edit option (mirrors Drive's
+             public-link model). The role pill is static so the scope is clear. -->
+        <span v-if="generalAccess === 'public'" class="sd-view-only">Can view</span>
       </div>
+
+      <!-- Sub-label clarifies the scope: a public sheet needs no login. -->
+      <p v-if="generalAccess === 'public'" class="sd-access-hint">
+        Anyone with the link can open this sheet read-only — no sign-in required.
+      </p>
+      <p v-else class="sd-access-hint">Only people added below can open this sheet.</p>
 
       <div class="sd-divider" />
 
@@ -167,8 +164,12 @@ const props = defineProps({
   sheetId:     { type: String,  default: '' },
   sheetTitle:  { type: String,  default: '' },
   ownerId:     { type: String,  default: '' },
+  // Whether this sheet currently has the public link enabled. Owned by the
+  // editor (it learns this from get_sheet); the dialog seeds its toggle from
+  // it on open and emits `public-changed` when the owner flips it.
+  isPublic:    { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:modelValue', 'shares-changed'])
+const emit = defineEmits(['update:modelValue', 'shares-changed', 'public-changed'])
 
 // ── open/close ─────────────────────────────────────────────────────────────
 
@@ -186,9 +187,18 @@ watch(show, (open) => {
     pendingRole.value = '0'
     searchQuery.value = ''
     searchResults.value = []
+    // Re-seed the public toggle from the editor's flag on each open.
+    generalAccess.value = props.isPublic ? 'public' : 'restricted'
     fetchShares()
     fetchOwnerInfo()
   }
+})
+
+// Keep the toggle in sync if the editor's flag changes while the dialog is
+// open (e.g. get_sheet resolves after the dialog mounts). Doesn't touch staged
+// chips — only the general-access state.
+watch(() => props.isPublic, (v) => {
+  if (show.value) generalAccess.value = v ? 'public' : 'restricted'
 })
 
 // ── inline error banner ──────────────────────────────────────────────────
@@ -238,30 +248,26 @@ const ownerInitials = computed(() => userInitials(ownerFullName.value, props.own
 
 // ── general access ─────────────────────────────────────────────────────────
 
-const generalAccess = ref('restricted')
-const generalRole   = ref('0')
+// Seeded from the prop so a dialog mounted already-open reflects the right
+// state immediately; the `show` watcher re-seeds on every subsequent open.
+const generalAccess = ref(props.isPublic ? 'public' : 'restricted')   // 'restricted' | 'public'
 
 const generalAccessOpts = computed(() => [
-  { label: 'Restricted',        onClick: () => applyGeneralAccess('restricted') },
-  { label: 'Accessible to all', onClick: () => applyGeneralAccess('all') },
-])
-const generalRoleOpts = computed(() => [
-  { label: 'Can view', onClick: () => { generalRole.value = '0'; applyGeneralAccess('all') } },
-  { label: 'Can edit', onClick: () => { generalRole.value = '1'; applyGeneralAccess('all') } },
+  { label: 'Restricted',          onClick: () => applyGeneralAccess('restricted') },
+  { label: 'Anyone with the link', onClick: () => applyGeneralAccess('public') },
 ])
 
 async function applyGeneralAccess(type) {
   const prevAccess = generalAccess.value
+  if (type === prevAccess) return
   generalAccess.value = type
   if (!props.sheetId) return
   try {
-    if (type === 'all') {
-      await call('sheets.api.share_sheet', {
-        name: props.sheetId, everyone: 1, write: generalRole.value === '1' ? 1 : 0,
-      })
-    } else {
-      await call('sheets.api.unshare_sheet', { name: props.sheetId, everyone: 1 })
-    }
+    await call('sheets.api.set_sheet_public', {
+      name: props.sheetId, public: type === 'public' ? 1 : 0,
+    })
+    // Tell the editor so its topbar "Public" indicator stays in sync.
+    emit('public-changed', type === 'public')
   } catch (err) {
     generalAccess.value = prevAccess   // revert visual state
     _flashError(err)
@@ -277,19 +283,11 @@ async function fetchShares() {
   if (!props.sheetId) return
   loading.value = true
   try {
+    // get_sheet_shares now returns only named members — public access is the
+    // `is_public` flag, seeded from the prop in the `show` watcher above.
     const rows = await call('sheets.api.get_sheet_shares', { name: props.sheetId })
-    // The "everyone" row encodes general access; keep it out of the member
-    // list and use it to seed the General Access dropdown so the dialog
-    // reflects persisted state on re-open.
-    const everyoneRow = rows.find(r => r.everyone)
-    if (everyoneRow) {
-      generalAccess.value = 'all'
-      generalRole.value   = everyoneRow.write ? '1' : '0'
-    } else {
-      generalAccess.value = 'restricted'
-    }
     shares.value = rows
-      .filter(r => !r.everyone && r.user !== props.ownerId)
+      .filter(r => r.user !== props.ownerId)
       .map(r => ({ ...r, write: !!r.write }))
     emit('shares-changed', shares.value.length)
   } catch (err) {
@@ -458,6 +456,20 @@ async function copyLink() {
 
 /* Make Frappe UI Button pill-shaped inside the access row */
 .sd-pill-btn :deep(button) { border-radius: 999px; }
+
+/* Static "Can view" pill shown when the public link is on — public access is
+   deliberately view-only, so this isn't a dropdown. */
+.sd-view-only {
+  font-size: 12px; color: var(--ink-gray-6);
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--surface-gray-2); white-space: nowrap;
+}
+
+/* One-line clarification of what the current general-access level means. */
+.sd-access-hint {
+  font-size: 11px; color: var(--ink-gray-5);
+  margin: 8px 0 0; line-height: 1.4;
+}
 
 /* ── Divider ── */
 .sd-divider { height: 1px; background: var(--outline-gray-1); margin: 16px 0; }

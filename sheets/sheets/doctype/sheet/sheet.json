@@ -11,7 +11,8 @@
   "head_snapshot",
   "trashed",
   "trashed_on",
-  "trashed_by"
+  "trashed_by",
+  "is_public"
  ],
  "fields": [
   {
@@ -61,6 +62,13 @@
    "label": "Trashed By",
    "read_only": 1,
    "depends_on": "trashed"
+  },
+  {
+   "fieldname": "is_public",
+   "fieldtype": "Check",
+   "label": "Anyone with the link can view",
+   "default": "0",
+   "description": "When set, anyone with the link can open this sheet read-only — no login required."
   }
  ],
  "links": [],
