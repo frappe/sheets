@@ -11,10 +11,33 @@
 
 export const SPARK_TYPES = new Set(['line', 'column'])
 
-// A hex (#rgb…#rrggbbaa) or bare CSS colour keyword — enough to reject a stray
-// #REF! / label that would otherwise reach the canvas as an invalid style
-// (which canvas silently ignores, painting in a leftover colour).
-const COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+)$/i
+// A colour is a hex literal (#rgb…#rrggbbaa) or a real CSS colour keyword. We
+// validate against the actual keyword set — a bare /[a-z]+/ would admit a typo
+// ("bluee") that canvas silently ignores, leaving the sparkline in whatever
+// colour was last set. An unrecognised value falls back to the default.
+const HEX_RE = /^#[0-9a-f]{3,8}$/i
+const CSS_COLORS = new Set((
+  'aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue ' +
+  'blueviolet brown burlywood cadetblue chartreuse chocolate coral cornflowerblue cornsilk ' +
+  'crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki ' +
+  'darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen ' +
+  'darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue ' +
+  'dimgray dimgrey dodgerblue firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite ' +
+  'gold goldenrod gray green greenyellow grey honeydew hotpink indianred indigo ivory khaki ' +
+  'lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan ' +
+  'lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen ' +
+  'lightskyblue lightslategray lightslategrey lightsteelblue lightyellow lime limegreen linen ' +
+  'magenta maroon mediumaquamarine mediumblue mediumorchid mediumpurple mediumseagreen ' +
+  'mediumslateblue mediumspringgreen mediumturquoise mediumvioletred midnightblue mintcream ' +
+  'mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid ' +
+  'palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum ' +
+  'powderblue purple rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown ' +
+  'seagreen seashell sienna silver skyblue slateblue slategray slategrey snow springgreen ' +
+  'steelblue tan teal thistle tomato transparent turquoise violet wheat white whitesmoke ' +
+  'yellow yellowgreen'
+).split(' '))
+
+function _isColor(c) { return HEX_RE.test(c) || CSS_COLORS.has(c.toLowerCase()) }
 
 // Normalise a type argument to a supported chart type (default 'line').
 export function sparkType(v) {
@@ -35,7 +58,7 @@ export function sparkSpec(data, type, color) {
     __spark: true,
     type: sparkType(type),
     data: nums,
-    color: COLOR_RE.test(c) ? c : null,
+    color: _isColor(c) ? c : null,
   }
 }
 

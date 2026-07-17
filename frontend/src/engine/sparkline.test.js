@@ -22,6 +22,8 @@ describe('sparkSpec', () => {
   it('keeps a valid color (hex or keyword), rejects garbage', () => {
     expect(sparkSpec([1], 'line', '  #f00 ').color).toBe('#f00')
     expect(sparkSpec([1], 'line', 'red').color).toBe('red')
+    expect(sparkSpec([1], 'line', 'steelblue').color).toBe('steelblue')
+    expect(sparkSpec([1], 'line', 'bluee').color).toBe(null)   // typo → default, not a leftover colour
     expect(sparkSpec([1], 'line', '#REF!').color).toBe(null)   // stray error text, not a colour
     expect(sparkSpec([1], 'line', '').color).toBe(null)
     expect(sparkSpec([1], 'line', 5).color).toBe(null)
