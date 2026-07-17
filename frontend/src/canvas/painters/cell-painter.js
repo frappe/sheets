@@ -9,7 +9,12 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
 
   // ── Public API ───────────────────────────────────────────────────────────────
 
-  function drawRegionCells(r0, c0, r1, c1, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor, getSparkline) {
+  // `getVal(id)` returns a cell's display string. It abstracts over the
+  // value source: the legacy eager `data` map (id => data[id]) or the lazy
+  // engine-backed lookup. The painter only ever touches cells in the visible
+  // region, so the lazy path computes display strings for ~hundreds of cells
+  // per frame instead of materialising the whole sheet up front.
+  function drawRegionCells(r0, c0, r1, c1, getVal, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor, getSparkline) {
     ctx.textBaseline = 'middle'
     // Two-pass paint: every cell's background + decorations first, then
     // every cell's text. Splitting the passes means an upstream cell's
@@ -20,12 +25,12 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     for (let r = r0; r <= r1; r++) {
       if (rh(r) === 0) continue
       for (let c = c0; c <= c1; c++)
-        _paintBgAt(r, c, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getDiffFor)
+        _paintBgAt(r, c, getVal, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getDiffFor)
     }
     for (let r = r0; r <= r1; r++) {
       if (rh(r) === 0) continue
       for (let c = c0; c <= c1; c++)
-        _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline)
+        _paintTextAt(r, c, getVal, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline)
     }
   }
 
@@ -47,13 +52,13 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
 
   // Shared per-cell geometry + format lookup. Both paint phases call this,
   // returns null for slave cells (so the caller knows to skip).
-  function _cellGeom(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat) {
+  function _cellGeom(r, c, getVal, getFormat, getMergeInfo, isSlave, getCondFormat) {
     const id = cellId(r, c)
     if (isSlave && isSlave(id)) return null
     const merge = getMergeInfo && getMergeInfo(id)
     const spanC = merge ? merge.colSpan : 1
     const spanR = merge ? merge.rowSpan : 1
-    const val   = data[id]
+    const val   = getVal(id)
     const fmt   = getFormat ? getFormat(id) : {}
     const x = colX(c), y = rowY(r)
     let w = 0, h = 0
@@ -63,8 +68,8 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     return { id, val, fmt, condFmt, merge, x, y, w, h }
   }
 
-  function _paintBgAt(r, c, data, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getDiffFor) {
-    const g = _cellGeom(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat)
+  function _paintBgAt(r, c, getVal, getFormat, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getDiffFor) {
+    const g = _cellGeom(r, c, getVal, getFormat, getMergeInfo, isSlave, getCondFormat)
     if (!g) return
     const { id, val, fmt, condFmt, merge, x, y, w, h } = g
     _drawCellBackground(x, y, w, h, merge, fmt, condFmt)
@@ -94,8 +99,8 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     if (condFmt?.icon) _drawCellIcon(x, y, h, condFmt.icon)
   }
 
-  function _paintTextAt(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline) {
-    const g = _cellGeom(r, c, data, getFormat, getMergeInfo, isSlave, getCondFormat)
+  function _paintTextAt(r, c, getVal, getFormat, getMergeInfo, isSlave, getCondFormat, getRightInset, getValidation, getSparkline) {
+    const g = _cellGeom(r, c, getVal, getFormat, getMergeInfo, isSlave, getCondFormat)
     if (!g) return
     const { id, val, fmt, condFmt, x, y, w, h } = g
     // A sparkline cell renders a mini chart in place of text.
@@ -126,7 +131,7 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
       const textW = ctx.measureText(s).width + 8
       const inside = drawW - rightInset
       if (textW > inside) {
-        const ext = _overflowExtension(r, c, efmt.align, textW - inside, data, getFormat, getMergeInfo, isSlave)
+        const ext = _overflowExtension(r, c, efmt.align, textW - inside, getVal, getFormat, getMergeInfo, isSlave)
         drawX -= ext.left
         drawW += ext.left + ext.right
       }
@@ -164,12 +169,12 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
   // pixels of extra room we can use. Stops at the first cell with a value,
   // an explicit background fill, or the grid edge — mirroring Sheets' rule
   // that bg-styled cells block overflow even when otherwise empty.
-  function _overflowExtension(r, c, align, needed, data, getFormat, getMergeInfo, isSlave) {
+  function _overflowExtension(r, c, align, needed, getVal, getFormat, getMergeInfo, isSlave) {
     const out = { left: 0, right: 0 }
     if (align === 'left' || align === 'center') {
       let nc = c + 1, want = align === 'center' ? needed / 2 : needed
       while (out.right < want && nc < TOTAL_COLS) {
-        if (_blocksOverflow(r, nc, data, getFormat, getMergeInfo, isSlave)) break
+        if (_blocksOverflow(r, nc, getVal, getFormat, getMergeInfo, isSlave)) break
         out.right += cw(nc); nc++
       }
     }
@@ -179,19 +184,19 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
       const want = align === 'center' ? (needed - out.right) : needed
       let nc = c - 1
       while (out.left < want && nc >= 0) {
-        if (_blocksOverflow(r, nc, data, getFormat, getMergeInfo, isSlave)) break
+        if (_blocksOverflow(r, nc, getVal, getFormat, getMergeInfo, isSlave)) break
         out.left += cw(nc); nc--
       }
     }
     return out
   }
 
-  function _blocksOverflow(r, c, data, getFormat, getMergeInfo, isSlave) {
+  function _blocksOverflow(r, c, getVal, getFormat, getMergeInfo, isSlave) {
     if (c < 0 || c >= TOTAL_COLS) return true
     const id = cellId(r, c)
     if (isSlave?.(id)) return true
     if (getMergeInfo?.(id)) return true
-    const v = data[id]
+    const v = getVal(id)
     if (v != null && v !== '') return true
     const f = getFormat ? getFormat(id) : null
     if (f?.backgroundColor) return true

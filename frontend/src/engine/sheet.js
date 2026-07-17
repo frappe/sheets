@@ -304,9 +304,11 @@ export function createSheet({ onCellChanged, onCellsChanged } = {}) {
 	function switchSheet(name) {
 		if (!sheets[name]) { sheets[name] = {}; deps.rebuild({}, name) }
 		current = name
-		// Notify all cells so the canvas is fully redrawn for the new sheet
-		for (const id of Object.keys(sheets[current]))
-			onCellChanged?.(id, getDisplayValue(id, current), current)
+		// No per-cell notify here. The host repaints the whole target sheet
+		// via its own switch handler (useSheetTabs onSwitch → _repopulateGrid),
+		// so firing onCellChanged for every cell of the target sheet just made
+		// the canvas paint it twice — and ran condFormat.invalidate() once per
+		// cell — doubling tab-switch cost on large sheets.
 	}
 
 	function addSheet(name) {

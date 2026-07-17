@@ -35,20 +35,11 @@
         <!-- Brand mark doubles as the "back to home" action. Clicking it runs
              flushAndClose so any pending edits are saved before navigation. -->
         <button class="sn-app-icon-btn" type="button" aria-label="Back to home" title="Back to home" @click="flushAndClose">
-          <svg class="sn-app-icon" width="28" height="28" viewBox="0 0 256 256" fill="none" aria-hidden="true">
-            <rect width="256" height="256" rx="60" fill="#0E7490"/>
-            <rect x="0.5" y="0.5" width="255" height="255" rx="59.5" stroke="white" stroke-opacity="0.12"/>
-            <g stroke="white" stroke-opacity="0.18" stroke-width="2" stroke-linecap="round">
-              <line x1="85"  y1="32"  x2="85"  y2="224"/>
-              <line x1="171" y1="32"  x2="171" y2="224"/>
-              <line x1="32"  y1="85"  x2="224" y2="85"/>
-              <line x1="32"  y1="171" x2="224" y2="171"/>
-            </g>
-            <polyline points="48,180 96,148 136,164 184,80 216,108"
-                      fill="none" stroke="#A5F0FA" stroke-width="18"
-                      stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="136" cy="164" r="11" fill="white"/>
-            <circle cx="184" cy="80"  r="11" fill="white"/>
+          <svg class="sn-app-icon" width="28" height="28" viewBox="0 0 118 118" fill="none" aria-hidden="true">
+            <path d="M93.9278 0H23.1013C10.3428 0 0 10.3428 0 23.1013V93.9278C0 106.686 10.3428 117.029 23.1013 117.029H93.9278C106.686 117.029 117.029 106.686 117.029 93.9278V23.1013C117.029 10.3428 106.686 0 93.9278 0Z" fill="#278F5E"/>
+            <path d="M77.757 25.9364H23.5215V36.437H77.757C80.6447 36.437 83.0073 38.7996 83.0073 41.6873V75.3942C83.0073 78.2818 80.6447 80.6445 77.757 80.6445H39.2724C36.3847 80.6445 34.0221 78.2818 34.0221 75.3942V50.6653H23.5215V75.3942C23.5215 84.0572 30.6094 91.1451 39.2724 91.1451H77.757C86.42 91.1451 93.5079 84.0572 93.5079 75.3942V41.6873C93.5079 33.0243 86.42 25.9364 77.757 25.9364Z" fill="white"/>
+            <path d="M53.8678 59.6958H43.3672V70.0914H53.8678V59.6958Z" fill="white"/>
+            <path d="M73.6617 50.6653H63.1611V70.1439H73.6617V50.6653Z" fill="white"/>
           </svg>
         </button>
         <input
@@ -449,7 +440,7 @@
           class="sn-filter-btn"
           :class="{ active: filterConfig[col.col] }"
           :style="col.style"
-          @click="openFilterPanel(col.col, $event)"
+          @click="openFilterPanel(col.col)"
         >
           <FeatherIcon name="chevron-down" class="sn-filter-btn-icon" />
         </button>
@@ -491,7 +482,7 @@
 
       <!-- Inline filter panel — sort + condition + Google-Sheets-style
            "Filter by values" checklist with search and Select all/Clear. -->
-      <div v-if="filterPanel.open" class="sn-filter-panel" :style="filterPanel.style">
+      <div v-if="filterPanel.open" class="sn-filter-panel" :style="filterPanelStyle">
         <div class="sn-fp-title">Column {{ colLabel(filterPanel.col) }}</div>
         <div class="sn-fp-row">
           <Button class="sn-fp-grow" size="sm" iconLeft="arrow-up"   label="A → Z" tooltip="Sort ascending"  @click="doSort(filterPanel.col, 'asc')" />
@@ -854,6 +845,7 @@
           <!-- Type -->
           <FormControl type="select" label="Type" v-model="validationDialog.type"
             :options="[
+              { label: 'Checkbox',       value: 'checkbox' },
               { label: 'List of items',  value: 'list' },
               { label: 'Number',         value: 'number' },
               { label: 'Text length',    value: 'text_length' },
@@ -868,7 +860,7 @@
           />
 
           <!-- Operator (number / text_length) -->
-          <FormControl v-if="validationDialog.type !== 'list'"
+          <FormControl v-if="['number','text_length'].includes(validationDialog.type)"
             type="select" label="Condition" v-model="validationDialog.operator"
             :options="[
               { label: 'Between',             value: 'between' },
@@ -883,7 +875,7 @@
           />
 
           <!-- Values -->
-          <div v-if="validationDialog.type !== 'list'" class="sn-vd-vals">
+          <div v-if="['number','text_length'].includes(validationDialog.type)" class="sn-vd-vals">
             <FormControl
               v-model="validationDialog.val1"
               type="number"
@@ -1163,6 +1155,10 @@ const sheet = createSheet({
     // per-rule min/max stats — any cell change can shift those bounds, so the
     // cache must be cleared before the next paint.
     condFormat?.invalidate()
+    // A chart may source from this cell — bump the chart data version so the
+    // overlay's matrix cache re-pulls. Drag/resize/scroll don't fire cell-change
+    // callbacks, so those keep hitting the cache (the reason it exists).
+    chartDataVersion.value++
     if (showFormulas.value) {
       grid?.setCell(id, String(sheet.getCell(id) ?? ''))
       return
@@ -1181,6 +1177,9 @@ const sheet = createSheet({
   //     onCellsChanged at 181 ms self time after the snapshot fix.
   onCellsChanged(_sheet, affected) {
     condFormat?.invalidate()
+    // Source data for any chart may have moved — invalidate the overlay's matrix
+    // cache (kept stale on drag/scroll, which don't reach this callback).
+    chartDataVersion.value++
     if (!affected) { _repopulateGrid(); return }
     const sn = sheet.getCurrentSheet()
     for (const id of affected) {
@@ -1188,6 +1187,10 @@ const sheet = createSheet({
       const displayValue = sheet.getDisplayValue(id)
       grid?.setCell(id, fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue)
     }
+    // A bulk edit (paste/fill) can change a pivot's source data; recompute so
+    // pivot output cells don't lag. affectsPivot() short-circuits when this
+    // sheet feeds no pivot, keeping the cheap incremental path cheap.
+    recomputePivotsForSheet(sn)
   },
 })
 const formats    = createFormatsEngine()
@@ -1196,7 +1199,13 @@ const sortFilter = createSortFilter(sheet)
 const comments   = createCommentsEngine()
 const validation = createValidationEngine()
 const condFormat = createCondFormatEngine()
-const clipboard  = createClipboard({ sheet, formats, condFormat, validation })
+const clipboard  = createClipboard({
+  sheet, formats, condFormat, validation,
+  // Late-bound to the pivot integration (declared below). Only invoked at
+  // copy/paste time, long after setup runs, so the forward reference is safe.
+  getPivotAt: (sel, sn) => getPivotAt(sel, sn),
+  createPivotFromPaste: (blob, anchorId, sn) => createPastedPivot(blob, anchorId, sn),
+})
 const pivot      = createPivotEngine()
 const charts     = createChartEngine()
 // Named ranges: the validator hook prevents users from defining names that
@@ -1315,6 +1324,8 @@ const history = createHistory({
   // so the full paste effect (values + formats + validation) round-trips
   // through undo/redo without the 320 ms snapshot tax.
   revertOp(op) {
+    // Structural op: undo of "add sheet" is just deleting the (empty) sheet.
+    if (op.opType === 'sheet_add') { _deleteSheet(op.name); return }
     _applyCellMap(op.before, op.subSheet)
     if (op.beforeFormats)    _applyFormatMap(op.beforeFormats, op.subSheet)
     if (op.beforeCols)       _applyAxisFormatMap('col', op.beforeCols, op.subSheet)
@@ -1323,6 +1334,8 @@ const history = createHistory({
     if (op.beforeMerge)      { merge.restore(op.beforeMerge); grid?.render?.() }
   },
   applyOp(op) {
+    // Structural op: redo of "add sheet" recreates the same empty sheet.
+    if (op.opType === 'sheet_add') { _addSheet(op.name); return }
     _applyCellMap(op.after, op.subSheet)
     if (op.afterFormats)    _applyFormatMap(op.afterFormats, op.subSheet)
     if (op.afterCols)       _applyAxisFormatMap('col', op.afterCols, op.subSheet)
@@ -1882,7 +1895,7 @@ const { exportCSV, exportXLSX, exportPDF, importCSV, importXLSX } = useExportImp
 //   - allValues: distinct displayed values in the column's data range, cached
 //     while the panel is open so we don't recompute on every keystroke.
 const filterPanel = reactive({
-  open: false, col: 0, style: {},
+  open: false, col: 0,
   mode: 'values',
   operator: 'contains', value: '',
   valueSet: new Set(),
@@ -2248,9 +2261,9 @@ const {
   pivotDialogOpen, pivotInitialRange, pivotEditId, pivotEditConfig, pivotVersion, pivotBuilding,
   activePivotConfig, pivotFabStyle, pivotHighlightStyle, pivotBannerMenuOptions,
   isPivotSheet, openPivotDialog, onPivotEdit, onPivotRefresh, onPivotDelete, onPivotConfirm,
-  recomputePivotsForSheet, drillDownAt,
+  recomputePivotsForSheet, drillDownAt, getPivotAt, createPastedPivot,
 } = usePivotIntegration({
-  pivot, sheet, formats, currentSheet, renderVersion,
+  pivot, sheet, formats, currentSheet, activeCell, renderVersion,
   getGrid: () => grid,
   contextMenu, switchSheet, syncNames,
   history, isDirty, repopulateGrid: _repopulateGrid,
@@ -2352,7 +2365,14 @@ const showSortFilter = computed({
   set(v) { v ? _createFilterOnSelection() : _removeFilter() },
 })
 
-function addSheet() { _addSheet(); history.push(); isDirty.value = true }
+// Adding a sheet used to push a full-workbook snapshot (history.push deep-clones
+// every cell of every sheet — ~2s on a large workbook). The new sheet is empty,
+// so undo/redo only needs its name: a cheap structural op instead of a snapshot.
+function addSheet() {
+  const name = _addSheet()
+  history.pushOp({ opType: 'sheet_add', subSheet: name, name })
+  isDirty.value = true
+}
 
 // ── Sheet-tab click — cross-sheet picker support ──────────────────────────────
 // When the user is mid-edit in the formula bar (`=…` content + bar has focus),
@@ -2478,6 +2498,26 @@ const visibleFilterCols = computed(() => {
       height: BTN + 'px',
     },
   }))
+})
+
+// Live position for the open filter panel. Recomputed on every canvas render
+// (renderVersion) so the panel tracks its column as the grid scrolls, anchored
+// to the column's chevron just like visibleFilterCols. Returns display:none when
+// the column scrolls out of the visible header range so the panel hides instead
+// of floating over unrelated columns; it reappears when scrolled back into view.
+const filterPanelStyle = computed(() => {
+  renderVersion.value
+  if (!filterPanel.open || !grid || !filterRange.value) return { display: 'none' }
+  const { r0 } = filterRange.value
+  const colRect = grid.getColumnHeaderRects().find(({ c }) => c === filterPanel.col)
+  const rowRect = grid.getRowRect(r0)
+  if (!colRect || !rowRect) return { display: 'none' }
+  const BTN = 16
+  const wrapW = gridWrapRef.value?.getBoundingClientRect().width ?? Infinity
+  return {
+    top:  (rowRect.y + rowRect.height + 2) + 'px',
+    left: clampFilterLeft(colRect.x + colRect.width - BTN - 3, wrapW) + 'px',
+  }
 })
 
 // Per-sub-sheet peer dots — small colored circles next to each tab label
@@ -2906,6 +2946,16 @@ function _setupGridInstance() {
       formulaValue.value = sheet.getCell(id)
     },
     getFormat:    id => formats.get(id, sheet.getCurrentSheet()),
+    // Lazy render value source (Phase 1, off by default). Mirrors exactly what
+    // _repopulateGrid / onCellChanged bake into the grid's eager `data` cache,
+    // so the lazy and eager render paths produce identical pixels. When enabled
+    // (grid.setLazyValues(true)), the grid pulls this per visible cell instead
+    // of materialising every cell up front.
+    getDisplay:   _cellDisplay,
+    // Non-empty cell ids for the current sheet — the lazy path's source for
+    // cold-path scans (Cmd+A extent, autofit) that used to walk the grid's
+    // own `data` keys.
+    getCellIds:   () => Object.keys(sheet.getRawData()),
     getMergeInfo: id => merge.getMasterInfo(id, sheet.getCurrentSheet()),
     isSlave:      id => merge.isSlave(id, sheet.getCurrentSheet()),
     getMasterId:  id => merge.getMasterId(id, sheet.getCurrentSheet()),
@@ -2932,6 +2982,7 @@ function _setupGridInstance() {
     },
     onHyperlinkClick(url) { window.open(url, '_blank', 'noopener,noreferrer') },
     onDropdownClick(id, rule, pos) { openDropdown(id, rule, pos) },
+    onCheckboxToggle(id) { toggleCheckbox(id) },
     onPivotDrill(r, c) { return drillDownAt(r, c) },
     getSheetNames() { return sheetNames.value },
     // Cross-sheet picker — grid prefixes inserted refs with the current sheet
@@ -2964,6 +3015,9 @@ function _setupGridInstance() {
       history.push()
       isDirty.value = true
     },
+    // Lazy render is the default; eager `data` cache stays as an opt-out
+    // fallback (`?lazy=0`). See _lazyValuesEnabled.
+    lazyValues: _lazyValuesEnabled(),
   })
   // Keep DOM overlays (filter chevrons) in sync with canvas scroll/resize/freeze.
   grid.onRender(() => { renderVersion.value++ })
@@ -3496,11 +3550,26 @@ function onDocCut(e) {
   grid.setMarchingAnts(src)
   _pushEditOp(sn, before, 'Cut')
 }
-function onDocPaste(e) {
+async function onDocPaste(e) {
   if (!_canvasActive()) return
   e.preventDefault()
   const destSel = grid.getSelection()
   const sn = sheet.getCurrentSheet()
+
+  // Pasting a copied pivot mints a new live pivot at the anchor rather than
+  // writing cells, so the op-based cell-diff undo below can't capture it (it
+  // would leave the rendered cells without their _pivots registry entry).
+  // Await the async render, then take one full history.push() snapshot, which
+  // captures both the pivot registry and the written cells atomically.
+  if (clipboard.hasData() && clipboard.getPivotBlob?.()) {
+    await clipboard.paste(activeCell.value, () => {}, 'all', destSel)
+    clipboardHas.value = clipboard.hasData()
+    grid.setMarchingAnts(null)
+    history.push()
+    isDirty.value = true
+    return
+  }
+
   // Snapshot the pre-paste state for cells + formats + validation across
   // the destination rect, plus cond-format rule count for the fallback
   // decision. The cells+formats+validation diff drives op-based undo; if
@@ -3522,10 +3591,19 @@ function onDocPaste(e) {
     clipboard.paste(activeCell.value, () => {}, 'all', destSel)
     pasted = true
   } else {
-    const text = e.clipboardData?.getData('text/plain')
-    if (text) {
-      clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
+    // Prefer the HTML flavor when it carries a real table — external apps
+    // (Gameplan, Google Sheets, web pages) put a structured <table> there,
+    // while their text/plain flavor can lack tab delimiters and collapse into
+    // a single column. Fall back to tab/newline-delimited plain text.
+    const html = e.clipboardData?.getData('text/html')
+    if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
       pasted = true
+    } else {
+      const text = e.clipboardData?.getData('text/plain')
+      if (text) {
+        clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
+        pasted = true
+      }
     }
   }
   clipboardHas.value = clipboard.hasData()
@@ -3592,7 +3670,8 @@ function doPasteSpecial(kind) {
     syncFlags()
   }
   isDirty.value = true
-  recomputePivotsForSheet(sheet.getCurrentSheet())
+  // Pivot recompute is handled centrally: the paste routed through
+  // batchSetCells, whose onCellsChanged callback recomputes affected pivots.
 }
 
 // Push the right history entry for a paste. Cell + format + validation
@@ -3838,7 +3917,9 @@ function confirmValidation() {
   const sn  = sheet.getCurrentSheet()
   const msg = validationDialog.message.trim() || undefined
   let rule
-  if (validationDialog.type === 'list') {
+  if (validationDialog.type === 'checkbox') {
+    rule = { type: 'checkbox', message: msg }
+  } else if (validationDialog.type === 'list') {
     const options = validationDialog.listRaw.split(',').map(s => s.trim()).filter(Boolean)
     rule = { type: 'list', options, message: msg }
   } else {
@@ -3850,9 +3931,29 @@ function confirmValidation() {
     rule = { type: validationDialog.type, operator: op, min, max, message: msg }
   }
   for (const id of ids) validation.set(id, rule, sn)
+
+  // Checkbox cells need a concrete value to render as unchecked and to feed
+  // formulas (SUM / COUNTIF) right away — fill blanks with FALSE, à la Sheets.
+  // The rule + these values ride in the single history.push() snapshot below,
+  // so one undo reverts the whole "apply checkboxes" action.
+  if (validationDialog.type === 'checkbox') {
+    const filled = []
+    for (const id of ids) {
+      const cur = sheet.getCell(id, sn)
+      if (cur == null || String(cur) === '') {
+        sheet.setCell(id, 'FALSE', sn)
+        filled.push({ id, value: 'FALSE' })
+      }
+    }
+    if (filled.length) {
+      broadcastBatchChange(sn, filled)
+      recomputePivotsForSheet(sn)
+    }
+  }
+
   validationDialog.open = false
   grid?.render()
-  history.push()   // validation rules live in the snapshot; record for undo
+  history.push()   // rule + any FALSE-fill live in the snapshot; record for undo
   isDirty.value = true
 }
 
@@ -3884,6 +3985,17 @@ function pickDropdownOption(opt) {
   sheet.setCell(id, opt)
   dropdownPanel.open = false
   _pushEditOp(sn, before, 'Edit cell')
+  recomputePivotsForSheet(sn)
+}
+
+// Clicking a checkbox cell's tickbox flips TRUE ↔ FALSE (empty → TRUE). Routed
+// through the same edit-op path as a dropdown pick so undo + collab match.
+function toggleCheckbox(id) {
+  const sn     = sheet.getCurrentSheet()
+  const before = { [id]: sheet.getCell(id, sn) }
+  const next   = String(before[id]).toUpperCase() === 'TRUE' ? 'FALSE' : 'TRUE'
+  sheet.setCell(id, next, sn)
+  _pushEditOp(sn, before, 'Toggle checkbox')
   recomputePivotsForSheet(sn)
 }
 
@@ -4158,9 +4270,7 @@ function _removeFilter() {
   isDirty.value = true
 }
 
-function openFilterPanel(colIdx, event) {
-  const rect = event.target.getBoundingClientRect()
-  const wrapRect = gridWrapRef.value.getBoundingClientRect()
+function openFilterPanel(colIdx) {
   const sn  = sheet.getCurrentSheet()
   const cfg = sortFilter.getFilterConfig(sn)
   const existing = cfg[colIdx]
@@ -4187,11 +4297,18 @@ function openFilterPanel(colIdx, event) {
     filterPanel.value     = ''
     filterPanel.valueSet  = new Set(allValues)
   }
-  filterPanel.style = {
-    top:  (rect.bottom - wrapRect.top + 2) + 'px',
-    left: (rect.left   - wrapRect.left)    + 'px',
-  }
   filterPanel.open = true
+}
+
+// The panel renders at FILTER_PANEL_W px outer width (260 content + 24 padding +
+// 2 border, content-box). clampFilterLeft keeps its full width inside the grid
+// wrap so chevrons on right-edge columns don't push the Apply/Close buttons
+// off-screen. Live positioning lives in the filterPanelStyle computed.
+const FILTER_PANEL_W = 286
+function clampFilterLeft(left, wrapWidth) {
+  const GAP = 6
+  const maxLeft = wrapWidth - FILTER_PANEL_W - GAP
+  return Math.max(GAP, Math.min(left, maxLeft))
 }
 
 // Alt+↓ on a canvas cell opens the filter panel for that cell's column. Forces
@@ -4214,10 +4331,8 @@ function openQuickFilterForActive() {
     filterPanel.col      = p.col
     filterPanel.operator = cfg[p.col]?.operator || 'contains'
     filterPanel.value    = cfg[p.col]?.value    || ''
-    filterPanel.style    = {
-      top:  (rowRect.y + rowRect.height + 2) + 'px',
-      left: (colRect.x + colRect.width - 232 - 4) + 'px',  // 232px panel width
-    }
+    // Position is derived live by the filterPanelStyle computed; we only need
+    // the column visible here so the panel has a valid anchor on open.
   })
 }
 
@@ -4482,15 +4597,22 @@ function confirmInsertMany() {
 
 function doDeleteRow() {
   contextMenu.open = false
-  const atRow = contextMenu.targetRow
   const sn = sheet.getCurrentSheet()
-  sheet.deleteRow(atRow)
-  formats.deleteRow(atRow, sn)
-  comments.deleteRow(atRow, sn)
-  validation.deleteRow(atRow, sn)
-  condFormat.deleteRow(atRow, sn)
-  sortFilter.deleteRow(atRow, sn)
-  grid.shiftRowHeights(atRow + 1, -1)
+  // Same span logic as doDeleteCol: delete the whole selected row block when
+  // the right-clicked row falls inside it, else just the targeted row.
+  const sel = grid.getSelection()
+  const within = sel && contextMenu.targetRow >= sel.r0 && contextMenu.targetRow <= sel.r1
+  const start  = within ? sel.r0 : contextMenu.targetRow
+  const count  = within ? sel.r1 - sel.r0 + 1 : 1
+  for (let i = 0; i < count; i++) {
+    sheet.deleteRow(start)
+    formats.deleteRow(start, sn)
+    comments.deleteRow(start, sn)
+    validation.deleteRow(start, sn)
+    condFormat.deleteRow(start, sn)
+    sortFilter.deleteRow(start, sn)
+    grid.shiftRowHeights(start + 1, -1)
+  }
   _repopulateGrid()
   _applyHiddenRows()
   markEdited()
@@ -4517,15 +4639,23 @@ function doInsertCol(right = false, count = 1) {
 
 function doDeleteCol() {
   contextMenu.open = false
-  const atCol = contextMenu.targetCol
   const sn = sheet.getCurrentSheet()
-  sheet.deleteCol(atCol)
-  formats.deleteCol(atCol, sn)
-  comments.deleteCol(atCol, sn)
-  validation.deleteCol(atCol, sn)
-  condFormat.deleteCol(atCol, sn)
-  sortFilter.deleteCol(atCol, sn)
-  grid.shiftColWidths(atCol + 1, -1)
+  // When the right-clicked column is inside a multi-column selection, delete
+  // every selected column; otherwise just the targeted one. Each delete shifts
+  // the rest left, so the block start index stays fixed across iterations.
+  const sel = grid.getSelection()
+  const within = sel && contextMenu.targetCol >= sel.c0 && contextMenu.targetCol <= sel.c1
+  const start  = within ? sel.c0 : contextMenu.targetCol
+  const count  = within ? sel.c1 - sel.c0 + 1 : 1
+  for (let i = 0; i < count; i++) {
+    sheet.deleteCol(start)
+    formats.deleteCol(start, sn)
+    comments.deleteCol(start, sn)
+    validation.deleteCol(start, sn)
+    condFormat.deleteCol(start, sn)
+    sortFilter.deleteCol(start, sn)
+    grid.shiftColWidths(start + 1, -1)
+  }
   _repopulateGrid()
   _applyHiddenRows()
   markEdited()
@@ -4773,11 +4903,75 @@ const { pushEditOp: _pushEditOp } = useEditOps({
 
 // ── Repopulate ────────────────────────────────────────────────────────────────
 
+// Lazy render path is the default (Phase 3 cutover): the grid pulls each
+// visible cell's display string on demand, so switch/load cost no longer scales
+// with cell count. The eager `data`-cache path is kept intact as a fallback —
+// disable lazy per-browser with `?lazy=0` or localStorage['sheets:lazy']='0' if
+// a rendering regression turns up on a real sheet.
+function _lazyValuesEnabled() {
+  try {
+    if (new URLSearchParams(window.location.search).get('lazy') === '0') return false
+    if (window.localStorage?.getItem('sheets:lazy') === '0') return false
+  } catch { /* no window/storage — fall through to default */ }
+  return true
+}
+
+// Display string for a single cell — the formatted value the canvas paints.
+// Single source of truth shared by the eager repopulate (below), the per-cell
+// onCellChanged repaint, and the lazy render path (grid `getDisplay`), so all
+// three render identical pixels. showFormulas mode paints raw formula text.
+function _cellDisplay(id) {
+  if (showFormulas.value) return String(sheet.getCell(id) ?? '')
+  const sn  = sheet.getCurrentSheet()
+  const fmt = formats.get(id, sn)
+  const dv  = sheet.getDisplayValue(id)
+  return fmt.numberFormat ? applyNumberFmt(dv, fmt.numberFormat) : dv
+}
+
+// Grow the grid's scrollable area to cover a sheet's used extent so the user
+// can scroll to their data. Shared by the eager and lazy repopulate paths.
+function _expandGridTo(maxCol, maxRow) {
+  const neededCols = maxCol + 1
+  const neededRows = maxRow + 1
+  if (grid.getTotalCols && grid.expandCols && neededCols > grid.getTotalCols())
+    grid.expandCols(neededCols - grid.getTotalCols())
+  if (grid.getTotalRows && grid.expandRows && neededRows > grid.getTotalRows())
+    grid.expandRows(neededRows - grid.getTotalRows())
+}
+
+// Sheet extent via a cheap char-code id-parse over the raw cell ids — no
+// formula eval or format work. The lazy path's fallback when the engine has
+// no load-time bounds hint (post-edit / never-visited sheet).
+function _scanBounds(sheetSn) {
+  const data = sheet.getRawData(sheetSn)
+  let maxCol = 0, maxRow = 0
+  for (const id in data) {
+    let col = 0, row = 0, i = 0
+    const len = id.length
+    while (i < len) { const c = id.charCodeAt(i); if (c < 65 || c > 90) break; col = col * 26 + (c - 64); i++ }
+    while (i < len) { const c = id.charCodeAt(i); if (c < 48 || c > 57) { row = 0; break } row = row * 10 + (c - 48); i++ }
+    if (col > 0 && row > 0) { if (col - 1 > maxCol) maxCol = col - 1; if (row - 1 > maxRow) maxRow = row - 1 }
+  }
+  return { maxCol, maxRow }
+}
+
 function _repopulateGrid() {
   if (!grid) return
+  const sheetSn = sheet.getCurrentSheet()
+
+  // Lazy path: the grid pulls each visible cell's display string on demand, so
+  // we materialise nothing here — switch/load no longer scale with cell count.
+  // Still size the grid to the sheet extent (cheap id-parse, or the engine's
+  // free load-time hint) and repaint.
+  if (grid.isLazyValues?.()) {
+    const b = sheet.consumeBounds?.(sheetSn) || _scanBounds(sheetSn)
+    _expandGridTo(b.maxCol, b.maxRow)
+    grid.render?.()
+    return
+  }
+
   grid.clearAll()
   const data    = sheet.getRawData()
-  const sheetSn = sheet.getCurrentSheet()
   const show    = showFormulas.value
   // Bounds: on load the engine hands us the sheet extent (derived cheaply from
   // the packed payload), so we skip re-parsing every cell id here entirely —
@@ -4820,12 +5014,7 @@ function _repopulateGrid() {
     const displayValue = sheet.getDisplayValue(id)
     grid.setCell(id, fmt.numberFormat ? applyNumberFmt(displayValue, fmt.numberFormat) : displayValue)
   }
-  const neededCols = maxCol + 1
-  const neededRows = maxRow + 1
-  if (grid.getTotalCols && grid.expandCols && neededCols > grid.getTotalCols())
-    grid.expandCols(neededCols - grid.getTotalCols())
-  if (grid.getTotalRows && grid.expandRows && neededRows > grid.getTotalRows())
-    grid.expandRows(neededRows - grid.getTotalRows())
+  _expandGridTo(maxCol, maxRow)
 }
 
 function toggleShowFormulas() {

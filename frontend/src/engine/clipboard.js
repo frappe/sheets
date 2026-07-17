@@ -3,18 +3,22 @@
 import { colLabel, parseCellId } from '../utils/cells.js'
 import { adjustFormula } from './formula-adjust.js'
 
-export function createClipboard({ sheet, formats, condFormat = null, validation = null }) {
+export function createClipboard({ sheet, formats, condFormat = null, validation = null, getPivotAt = null, createPivotFromPaste = null }) {
 	let _data    = null   // { 'dr,dc': rawValue }
 	let _fmts    = null   // { 'dr,dc': formatObj }
 	let _vals    = null   // { 'dr,dc': validationRule | null }
 	let _mode    = null   // 'copy' | 'cut'
 	let _srcSel  = null   // { r0, c0, r1, c1 } of the source
+	let _pivot   = null   // portable pivot config when the source overlaps a pivot
 
 	// ── Capture ───────────────────────────────────────────────────────────────
 
 	function _capture(sel, mode) {
 		const { r0, c0, r1, c1 } = sel
 		_data = {}; _fmts = {}; _vals = {}; _mode = mode; _srcSel = sel
+		// If the copied range overlaps a pivot, remember its config so a paste
+		// can mint a new live pivot instead of dead values (Google Sheets UX).
+		_pivot = getPivotAt ? getPivotAt(sel, sheet.getCurrentSheet()) : null
 		for (let r = r0; r <= r1; r++) {
 			for (let c = c0; c <= c1; c++) {
 				const key = `${r - r0},${c - c0}`
@@ -111,6 +115,18 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		const anch = parseCellId(anchorId)
 		if (!anch) return
 		const sh = sheet.getCurrentSheet()
+
+		// A full paste of a copied pivot mints a new live pivot at the anchor
+		// instead of writing static cells — the pivot renders its own output, so
+		// writing the copied values first would just be overwritten (and would
+		// drag the source sheet's formats along). Paste-special (values/formulas/
+		// formats) skips this and pastes dead cells — the "just the numbers" path.
+		// Returns the (async) render promise so the caller can await it before
+		// snapshotting history.
+		if (_pivot && kind === 'all' && createPivotFromPaste) {
+			return createPivotFromPaste(_pivot, anchorId, sh)
+		}
+
 		const targets = _resolveTargets(anch, destSel)
 
 		// Two-pass: build the cell-value map first, hand it to batchSetCells in
@@ -184,7 +200,7 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 				}
 			if (sheet.batchSetCells) sheet.batchSetCells(clears, sh, { replace: false })
 			else                     for (const id of Object.keys(clears)) sheet.setCell(id, '', sh)
-			_data = _fmts = _vals = _mode = _srcSel = null
+			_data = _fmts = _vals = _mode = _srcSel = _pivot = null
 		}
 		// Post-mutate snapshot — history.push() must run after the data has
 		// settled so undo restores the correct state.
@@ -204,14 +220,64 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		return sheet.getDisplayValue(srcId)
 	}
 
+	// Parse an HTML fragment's first <table> into a 2D grid of cell strings, or
+	// null if there's no usable table. External apps (Gameplan, Google Sheets,
+	// Excel Online, web pages) put a full <table> on the `text/html` clipboard
+	// flavor — richer than their `text/plain` flavor, which some editors emit
+	// without tab delimiters (so it collapses into a single column). colspan is
+	// honored by padding blanks; rowspan is left as-is (rare, and its cell text
+	// simply lands in the top row of the span).
+	function parseHTMLTable(html) {
+		if (!html || typeof DOMParser === 'undefined') return null
+		const doc   = new DOMParser().parseFromString(html, 'text/html')
+		const table = doc.querySelector('table')
+		if (!table) return null
+		const grid = []
+		// Only the outer table's own rows/cells — a bare querySelectorAll('tr')
+		// descends into any nested <table> inside a cell (common in web-page
+		// clipboard HTML) and bleeds its rows into the outer grid. A nested
+		// table's text still lands in the parent cell via textContent, which is
+		// what we want.
+		const rows = table.querySelectorAll(
+			':scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr',
+		)
+		for (const tr of rows) {
+			const row = []
+			for (const cell of tr.querySelectorAll(':scope > th, :scope > td')) {
+				const text = (cell.textContent ?? '').replace(/\s+/g, ' ').trim()
+				row.push(text)
+				const span = parseInt(cell.getAttribute('colspan') || '1', 10)
+				for (let i = 1; i < span; i++) row.push('')
+			}
+			grid.push(row)
+		}
+		// Drop trailing all-empty rows some editors append.
+		while (grid.length && grid[grid.length - 1].every(c => c === '')) grid.pop()
+		return grid.length ? grid : null
+	}
+
+	// Paste an HTML-table grid (from an external app's `text/html` flavor).
+	// Shares the placement/tiling/bulk-write path with pasteFromText.
+	function pasteFromHTML(html, anchorId, historyPush, destSel = null) {
+		const grid = parseHTMLTable(html)
+		if (!grid) return false
+		return _pasteGrid(grid, anchorId, historyPush, destSel)
+	}
+
 	// Paste raw text (from system clipboard / external app).  Honors destSel so
 	// pasting a single token into a multi-cell selection fills the whole range.
 	function pasteFromText(text, anchorId, historyPush, destSel = null) {
 		if (!text?.trim()) return
-		const anch = parseCellId(anchorId)
-		if (!anch) return
 		const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trimEnd().split('\n')
 		const grid  = lines.map(l => l.split('\t'))
+		return _pasteGrid(grid, anchorId, historyPush, destSel)
+	}
+
+	// Place a 2D grid of cell strings at the anchor (or tiled across destSel),
+	// then ship one bulk write. Shared by pasteFromText and pasteFromHTML.
+	function _pasteGrid(grid, anchorId, historyPush, destSel = null) {
+		const anch = parseCellId(anchorId)
+		if (!anch) return false
 		const srcRows = grid.length
 		const srcCols = grid.reduce((m, r) => Math.max(m, r.length), 0)
 
@@ -242,13 +308,18 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		if (sheet.batchSetCells) sheet.batchSetCells(writes, sn, { replace: false })
 		else                     for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sn)
 		historyPush?.()   // post-mutate snapshot
+		return true
 	}
 
 	// Expand selection to fit pasted content (used for visual feedback).
 	function hasData() { return !!_data }
 	function getMode() { return _mode }
 	function getSourceSel() { return _data ? _srcSel : null }
-	function clear() { _data = _fmts = _vals = _mode = _srcSel = null }
+	// The pivot config captured on copy, if the source overlapped a pivot. Lets
+	// the paste dispatcher branch its undo bookkeeping (a pivot paste needs a
+	// full snapshot, not the cell-diff op).
+	function getPivotBlob() { return _data ? _pivot : null }
+	function clear() { _data = _fmts = _vals = _mode = _srcSel = _pivot = null }
 
-	return { copy, cut, paste, pasteFromText, hasData, getMode, getSourceSel, clear }
+	return { copy, cut, paste, pasteFromText, pasteFromHTML, hasData, getMode, getSourceSel, getPivotBlob, clear }
 }

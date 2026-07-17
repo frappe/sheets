@@ -12,10 +12,11 @@ function fakePivotEngine() {
   return {
     list:         ()       => [...store],
     get:          (id)     => store.find(p => p.id === id) ?? null,
-    add:          (config) => { store.push({ ...config, id: String(nextId++) }); notify() },
-    update:       (id, cfg)=> { const i = store.findIndex(p => p.id === id); if (i >= 0) { store[i] = { ...cfg, id }; notify() } },
+    add:          (config) => { const id = config.id || String(nextId++); store.push({ anchorRow: 0, anchorCol: 0, ...config, id }); notify(); return id },
+    update:       (id, cfg)=> { const i = store.findIndex(p => p.id === id); if (i >= 0) { store[i] = { ...store[i], ...cfg, id }; notify() } },
     remove:       (id)     => { const i = store.findIndex(p => p.id === id); if (i >= 0) { store.splice(i, 1); notify() } },
-    restore:      (data)   => { store.splice(0); (data?.pivots ? Object.values(data.pivots) : []).forEach(p => store.push({ ...p })); notify() },
+    restore:      (data)   => { store.splice(0); (data?.pivots ? Object.values(data.pivots) : []).forEach(p => store.push({ anchorRow: 0, anchorCol: 0, ...p })); notify() },
+    setExtent:    (id, ext)=> { const p = store.find(x => x.id === id); if (p) p._extent = ext },
     affectsPivot: (sh)     => store.some(p => p.sourceSheet === sh),
     setOnChange:  (cb)     => { onChange = cb },
   }
@@ -43,6 +44,7 @@ function makeDeps(overrides = {}) {
   const pivot       = fakePivotEngine()
   const sheet       = fakeSheet()
   const currentSheet = ref('Sheet1')
+  const activeCell  = ref('A1')
   const renderVersion = ref(0)
   const contextMenu = { open: false }
   const switchSheet = vi.fn()
@@ -52,13 +54,13 @@ function makeDeps(overrides = {}) {
   const repopulateGrid = vi.fn()
 
   const deps = {
-    pivot, sheet, currentSheet, renderVersion,
+    pivot, sheet, currentSheet, activeCell, renderVersion,
     getGrid: () => null,
     contextMenu, switchSheet, syncNames,
     history, isDirty, repopulateGrid,
     ...overrides,
   }
-  return { deps, pivot, sheet, currentSheet }
+  return { deps, pivot, sheet, currentSheet, activeCell }
 }
 
 // ── isPivotSheet ──────────────────────────────────────────────────────────────
@@ -169,6 +171,69 @@ describe('activePivotConfig after engine restore', () => {
 
     pivot.restore({ pivots: { p1: { id: 'p1', outputSheet: 'PivotOut', sourceSheet: 'Sheet1', rows: ['A'], cols: [], values: [] } } })
     expect(activePivotConfig.value?.outputSheet).toBe('PivotOut')
+  })
+})
+
+// ── multiple pivots per sheet (selection-aware) ───────────────────────────────
+
+describe('activePivotConfig — multiple pivots on one sheet', () => {
+  it('picks the pivot whose output rectangle contains the active cell', () => {
+    const { deps, pivot, currentSheet, activeCell } = makeDeps()
+    currentSheet.value = 'Sheet1'
+    pivot.add({ id: 'a', outputSheet: 'Sheet1', sourceSheet: 'Src', rows: ['R'], cols: [], values: [], anchorRow: 0, anchorCol: 0 })
+    pivot.add({ id: 'b', outputSheet: 'Sheet1', sourceSheet: 'Src', rows: ['R'], cols: [], values: [], anchorRow: 0, anchorCol: 7 })
+    pivot.setExtent('a', { r0: 0, c0: 0, r1: 5, c1: 1 })
+    pivot.setExtent('b', { r0: 0, c0: 7, r1: 5, c1: 8 })
+    const { activePivotConfig } = usePivotIntegration(deps)
+
+    activeCell.value = 'A2'   // inside pivot a (col 0)
+    expect(activePivotConfig.value?.id).toBe('a')
+    activeCell.value = 'H3'   // inside pivot b (col 7)
+    expect(activePivotConfig.value?.id).toBe('b')
+    activeCell.value = 'D3'   // between the two → no pivot
+    expect(activePivotConfig.value).toBeNull()
+  })
+})
+
+// ── copy/paste a pivot ────────────────────────────────────────────────────────
+
+describe('getPivotAt', () => {
+  it('returns a portable blob (no id/anchor/outputSheet) when the selection overlaps a pivot', () => {
+    const { deps, pivot } = makeDeps()
+    pivot.add({ id: 'a', outputSheet: 'Sheet1', sourceSheet: 'Src', sourceRange: 'A1:B9', rows: ['R'], cols: [], values: [{ field: 'V', agg: 'sum' }], anchorRow: 0, anchorCol: 0 })
+    pivot.setExtent('a', { r0: 0, c0: 0, r1: 5, c1: 1 })
+    const { getPivotAt } = usePivotIntegration(deps)
+
+    const blob = getPivotAt({ r0: 0, c0: 0, r1: 5, c1: 1 }, 'Sheet1')
+    expect(blob).toMatchObject({ sourceSheet: 'Src', sourceRange: 'A1:B9', rows: ['R'], values: [{ field: 'V', agg: 'sum' }] })
+    expect(blob).not.toHaveProperty('id')
+    expect(blob).not.toHaveProperty('outputSheet')
+    expect(blob).not.toHaveProperty('anchorRow')
+  })
+
+  it('returns null when the selection touches no pivot', () => {
+    const { deps, pivot } = makeDeps()
+    pivot.add({ id: 'a', outputSheet: 'Sheet1', sourceSheet: 'Src', rows: ['R'], cols: [], values: [], anchorRow: 0, anchorCol: 0 })
+    pivot.setExtent('a', { r0: 0, c0: 0, r1: 5, c1: 1 })
+    const { getPivotAt } = usePivotIntegration(deps)
+    expect(getPivotAt({ r0: 0, c0: 7, r1: 5, c1: 8 }, 'Sheet1')).toBeNull()
+  })
+})
+
+describe('createPastedPivot', () => {
+  it('adds an independent pivot anchored at the paste cell', async () => {
+    const { deps, pivot } = makeDeps()
+    const { createPastedPivot } = usePivotIntegration(deps)
+    const blob = { sourceSheet: 'Src', sourceRange: 'A1:B9', rows: ['R'], cols: [], values: [{ field: 'V', agg: 'sum' }] }
+
+    await createPastedPivot(blob, 'H1', 'Sheet1')
+    expect(pivot.list()).toHaveLength(1)
+    const cfg = pivot.list()[0]
+    expect(cfg.outputSheet).toBe('Sheet1')
+    expect(cfg.anchorRow).toBe(0)
+    expect(cfg.anchorCol).toBe(7)
+    expect(cfg.sourceRange).toBe('A1:B9')
+    expect(deps.repopulateGrid).toHaveBeenCalled()
   })
 })
 
