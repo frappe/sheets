@@ -64,6 +64,17 @@ describe('CommentsEngine — threads', () => {
     expect(c.getThread('A1', 'Sheet1')).toBeNull()
   })
 
+  it('mutations replace the object — a captured reference stays frozen', () => {
+    c.addReply('A1', reply('one'), 'Sheet1')
+    const before = c.getThread('A1', 'Sheet1')      // capture the current state
+    c.addReply('A1', reply('two'), 'Sheet1')
+    c.resolve('A1', true, 'Sheet1')
+    expect(before.thread).toHaveLength(1)            // frozen: not appended to
+    expect(before.resolved).toBe(false)             // frozen: not flipped
+    expect(c.getThread('A1', 'Sheet1').thread).toHaveLength(2)
+    expect(c.getThread('A1', 'Sheet1').resolved).toBe(true)
+  })
+
   it('preview is the first reply text', () => {
     c.addReply('A1', reply('first'), 'Sheet1')
     c.addReply('A1', reply('second'), 'Sheet1')

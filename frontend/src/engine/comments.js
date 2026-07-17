@@ -59,6 +59,12 @@ export function createCommentsEngine() {
 
   // ── Mutations ────────────────────────────────────────────────────────────────
 
+  // Every mutation REPLACES the thread object rather than editing it in place,
+  // so a reference captured earlier (an undo payload, an open panel) stays
+  // frozen at its old state and can never be corrupted by a later edit. This is
+  // the root-cause guard against aliasing; the deep-clones in restore/setThread
+  // are defence-in-depth on top of it.
+
   // Append a reply, creating the thread if new. A new reply reopens a resolved
   // thread (someone had more to say). `ts` is injectable for deterministic tests.
   function addReply(id, { author = '', name = '', text, ts = Date.now(), mentions = [] } = {}, sheet = 'Sheet1') {
@@ -68,21 +74,23 @@ export function createCommentsEngine() {
     const entry = { author, name, text: clean, ts }
     if (mentions.length) entry.mentions = mentions
     const t = getThread(id, sheet)
-    if (t) { t.thread.push(entry); t.resolved = false }
-    else store[sheet][id] = { resolved: false, thread: [entry] }
+    store[sheet][id] = t
+      ? { resolved: false, thread: [...t.thread, entry] }
+      : { resolved: false, thread: [entry] }
   }
 
   // Drop one reply; if it was the last, the whole thread goes.
   function removeReply(id, index, sheet = 'Sheet1') {
     const t = getThread(id, sheet)
     if (!t || !t.thread[index]) return
-    t.thread.splice(index, 1)
-    if (!t.thread.length) delete store[sheet][id]
+    const thread = t.thread.filter((_, i) => i !== index)
+    if (thread.length) store[sheet][id] = { ...t, thread }
+    else delete store[sheet][id]
   }
 
   function resolve(id, resolved, sheet = 'Sheet1') {
     const t = getThread(id, sheet)
-    if (t) t.resolved = !!resolved
+    if (t) store[sheet][id] = { ...t, resolved: !!resolved }
   }
 
   function clear(id, sheet = 'Sheet1') {

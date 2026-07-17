@@ -973,7 +973,7 @@
       </div>
 
       <div v-if="commentPanel.thread.length" class="sn-comment-thread">
-        <div v-for="(r, i) in commentPanel.thread" :key="i" class="sn-comment-reply">
+        <div v-for="(r, i) in commentPanel.thread" :key="`${r.ts}-${r.author}`" class="sn-comment-reply">
           <div class="sn-comment-reply-head">
             <span class="sn-comment-author">{{ r.name || r.author || 'Someone' }}</span>
             <span class="sn-comment-time">{{ commentTime(r.ts) }}</span>
