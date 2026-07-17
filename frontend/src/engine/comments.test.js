@@ -75,6 +75,15 @@ describe('CommentsEngine — threads', () => {
     c.clear('A1', 'Sheet1')
     expect(c.getThread('A1', 'Sheet1')).toBeNull()
   })
+
+  it('setThread stores an isolated copy — no aliasing with the caller', () => {
+    const src = { resolved: false, thread: [{ text: 'x' }] }
+    c.setThread('A1', src, 'Sheet1')
+    src.thread.push({ text: 'leak' })   // mutate the caller's object afterwards
+    src.resolved = true
+    expect(c.getThread('A1', 'Sheet1').thread).toHaveLength(1)
+    expect(c.getThread('A1', 'Sheet1').resolved).toBe(false)
+  })
 })
 
 describe('CommentsEngine — legacy migration', () => {

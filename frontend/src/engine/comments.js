@@ -90,10 +90,12 @@ export function createCommentsEngine() {
   }
 
   // Replace a cell's whole thread (or clear it). Used by op-replay / undo, which
-  // captures the entire before/after thread rather than a single reply.
+  // captures the entire before/after thread rather than a single reply. Deep-
+  // clones so the stored thread is isolated from the caller's object — later
+  // in-place mutations (addReply/resolve) can never leak into a restored state.
   function setThread(id, value, sheet = 'Sheet1') {
     ensure(sheet)
-    if (value) store[sheet][id] = value
+    if (value) store[sheet][id] = deepClone(value)
     else delete store[sheet][id]
   }
 
