@@ -18,7 +18,7 @@
     "name": "vue.runtime.esm-bundler"
   },
   "index.html": {
-    "file": "index.xFcizl1H.js",
+    "file": "index.BZfJ3lxT.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -32,7 +32,7 @@
       "node_modules/@sentry/vue/build/esm/index.js"
     ],
     "css": [
-      "index.DVS68sx6.css"
+      "index.Cy_Sx8kc.css"
     ],
     "assets": [
       "Inter.var.C9xDBOS3.woff2",
@@ -46,7 +46,7 @@
     "isDynamicEntry": true
   },
   "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue": {
-    "file": "FontColor.hCfPzu5a.js",
+    "file": "FontColor.BVdAzy7X.js",
     "name": "FontColor",
     "src": "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue",
     "isDynamicEntry": true,
@@ -56,7 +56,7 @@
     ]
   },
   "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue": {
-    "file": "InsertIframe._FMxGgxX.js",
+    "file": "InsertIframe.-OVKvqTg.js",
     "name": "InsertIframe",
     "src": "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue",
     "isDynamicEntry": true,
@@ -90,7 +90,7 @@
     "isDynamicEntry": true
   },
   "src/pages/SheetEditor/ChartView.vue": {
-    "file": "ChartView.PulDdV2f.js",
+    "file": "ChartView.DY-iyAgy.js",
     "name": "ChartView",
     "src": "src/pages/SheetEditor/ChartView.vue",
     "isDynamicEntry": true,
