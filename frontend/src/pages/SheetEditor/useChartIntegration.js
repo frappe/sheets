@@ -35,9 +35,11 @@ export function useChartIntegration({
 	const chartEditId       = ref('')
 	const chartEditConfig   = ref(null)
 	const chartVersion      = ref(0)
-	// Bumped ONLY when the source data should be re-pulled (refresh) — NOT on
-	// move/resize. The overlay keys its matrix cache on this so dragging a chart
-	// over a 100k-row source doesn't re-materialise the matrix every frame.
+	// Bumped when the source data should be re-pulled: on refresh AND on any
+	// sheet cell change (index.vue's onCellChanged/onCellsChanged) — but NOT on
+	// move/resize/scroll. The overlay keys its matrix cache on this so dragging a
+	// chart over a 100k-row source doesn't re-materialise the matrix every frame,
+	// while edits to the source range still refresh the chart.
 	const chartDataVersion  = ref(0)
 	const selectedChartId   = ref('')
 

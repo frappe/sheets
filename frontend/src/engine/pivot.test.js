@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computePivot, computePivotModel, pivotDrillDown } from './pivot.js'
+import { computePivot, computePivotModel, pivotDrillDown, writePivotToSheet, createPivotEngine } from './pivot.js'
 
 // getRangeValues stub — pivot only cares about the 2D array (row 0 = headers).
 const ranged = (data) => () => data
@@ -136,5 +136,71 @@ describe('computePivotModelAsync', () => {
   it('bails out when onYield reports it was superseded', async () => {
     const model = await computePivotModelAsync(config, slicer(data), { blockRows: 1, onYield: () => false })
     expect(model).toBeNull()
+  })
+})
+
+describe('writePivotToSheet — anchor offset & rect clear', () => {
+  const cid = (r, c) => String.fromCharCode(65 + c) + (r + 1)
+  const table = [['H1', 'H2'], ['a', 1], ['Grand Total', 5]]
+
+  it('writes at A1 by default and clears nothing on first render', () => {
+    const cells = {}
+    const cleared = []
+    writePivotToSheet(table, 'Out',
+      (id, v) => { cells[id] = v },
+      (sh, ext) => cleared.push(ext))
+    expect(cells.A1).toBe('H1')
+    expect(cells.B3).toBe(5)
+    expect(cleared).toEqual([null])   // prevExtent null → nothing cleared
+  })
+
+  it('offsets every write by the anchor', () => {
+    const cells = {}
+    writePivotToSheet(table, 'Out',
+      (id, v) => { cells[id] = v },
+      () => {},
+      { row: 0, col: 7 })             // anchor at H1
+    expect(cells.H1).toBe('H1')       // top-left lands at the anchor
+    expect(cells.I3).toBe(5)          // bottom-right offset too
+    expect(cells.A1).toBeUndefined()  // nothing written at the origin
+  })
+
+  it('passes the previous extent to clearRect so only the old rect is wiped', () => {
+    const prev = { r0: 0, c0: 7, r1: 9, c1: 8 }
+    let got = null
+    writePivotToSheet(table, 'Out', () => {}, (sh, ext) => { got = ext }, { row: 0, col: 7 }, prev)
+    expect(got).toEqual(prev)
+  })
+})
+
+describe('createPivotEngine — anchors, extent, snapshot', () => {
+  it('defaults anchorRow/anchorCol to 0 on add, honouring an explicit anchor', () => {
+    const e = createPivotEngine()
+    const id1 = e.add({ outputSheet: 'S', rows: ['R'], values: [] })
+    expect(e.get(id1)).toMatchObject({ anchorRow: 0, anchorCol: 0 })
+    const id2 = e.add({ outputSheet: 'S', rows: ['R'], values: [], anchorRow: 3, anchorCol: 7 })
+    expect(e.get(id2)).toMatchObject({ anchorRow: 3, anchorCol: 7 })
+  })
+
+  it('restore() defaults missing anchors but keeps a stored 0', () => {
+    const e = createPivotEngine()
+    e.restore({ pivots: {
+      old: { id: 'old', outputSheet: 'S', rows: ['R'], values: [] },        // pre-anchor config
+      zero: { id: 'zero', outputSheet: 'S', rows: ['R'], values: [], anchorRow: 0, anchorCol: 0 },
+    }, nextId: 9 })
+    expect(e.get('old')).toMatchObject({ anchorRow: 0, anchorCol: 0 })
+    expect(e.get('zero')).toMatchObject({ anchorRow: 0, anchorCol: 0 })
+  })
+
+  it('setExtent caches a rect without notifying, and snapshot strips it', () => {
+    const e = createPivotEngine()
+    let notifications = 0
+    e.setOnChange(() => { notifications++ })
+    const id = e.add({ outputSheet: 'S', rows: ['R'], values: [] })  // 1 notify
+    e.setExtent(id, { r0: 0, c0: 0, r1: 5, c1: 1 })
+    expect(e.get(id)._extent).toEqual({ r0: 0, c0: 0, r1: 5, c1: 1 })
+    expect(notifications).toBe(1)                                    // setExtent silent
+    const snap = e.snapshot()
+    expect(snap.pivots[id]).not.toHaveProperty('_extent')            // transient, not persisted
   })
 })

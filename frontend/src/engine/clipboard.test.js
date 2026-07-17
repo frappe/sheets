@@ -13,6 +13,53 @@ function makeSheet(initial = {}) {
   }
 }
 
+describe('clipboard — copy/paste a pivot', () => {
+  let sheet
+  const pivotBlob = { sourceSheet: 'Src', sourceRange: 'A1:B9', rows: ['R'], cols: [], values: [{ field: 'V', agg: 'sum' }] }
+
+  beforeEach(() => { sheet = makeSheet({ A1: 'H1', A2: 'a', B2: 1 }) })
+
+  it('captures the pivot blob when the copied range overlaps a pivot', () => {
+    const cb = createClipboard({ sheet, getPivotAt: () => pivotBlob })
+    cb.copy({ r0: 0, c0: 0, r1: 2, c1: 1 })
+    expect(cb.getPivotBlob()).toEqual(pivotBlob)
+  })
+
+  it('a full paste mints a new pivot at the anchor instead of writing cells', () => {
+    const calls = []
+    const cb = createClipboard({
+      sheet,
+      getPivotAt: () => pivotBlob,
+      createPivotFromPaste: (blob, anchorId, sn) => { calls.push({ blob, anchorId, sn }) },
+    })
+    cb.copy({ r0: 0, c0: 0, r1: 2, c1: 1 })
+    cb.paste('H1', null, 'all')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ blob: pivotBlob, anchorId: 'H1' })
+    expect(sheet.getCell('H1')).toBe('')   // no static cells written
+  })
+
+  it('paste-special (values) ignores the blob and pastes dead cells', () => {
+    const calls = []
+    const cb = createClipboard({
+      sheet,
+      getPivotAt: () => pivotBlob,
+      createPivotFromPaste: (...a) => { calls.push(a) },
+    })
+    cb.copy({ r0: 0, c0: 0, r1: 2, c1: 1 })
+    cb.paste('H1', null, 'values')
+    expect(calls).toHaveLength(0)          // not treated as a pivot
+    expect(sheet.getCell('H1')).toBe('H1') // static value pasted
+  })
+
+  it('clears the captured blob on clear()', () => {
+    const cb = createClipboard({ sheet, getPivotAt: () => pivotBlob })
+    cb.copy({ r0: 0, c0: 0, r1: 2, c1: 1 })
+    cb.clear()
+    expect(cb.getPivotBlob()).toBeNull()
+  })
+})
+
 describe('clipboard — destination-aware paste', () => {
   let sheet, cb
   beforeEach(() => {

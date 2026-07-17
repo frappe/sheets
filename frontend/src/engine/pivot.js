@@ -261,14 +261,19 @@ export function pivotDrillDown(model, r, c) {
 
 // ── Write pivot output to sheet ──────────────────────────────────────────────
 
-export function writePivotToSheet(table, outputSheet, setCell, clearSheet) {
-  clearSheet(outputSheet)
+// Write a computed pivot table into the sheet, offset by `anchor` (so several
+// pivots can coexist on one sheet at different origins). `clearRect` wipes only
+// the pivot's *previous* output rectangle (`prevExtent`, or nothing on the
+// first render) instead of the whole sheet, so a rebuild never erases a
+// neighbouring pivot or user data.
+export function writePivotToSheet(table, outputSheet, setCell, clearRect, anchor = { row: 0, col: 0 }, prevExtent = null) {
+  clearRect(outputSheet, prevExtent)
   for (let r = 0; r < table.length; r++) {
     for (let c = 0; c < table[r].length; c++) {
       const v = table[r][c]
       if (v === null || v === undefined || v === '') continue
       // Preserve numeric type so values sort/formula-reference correctly.
-      setCell(cellId(r, c), typeof v === 'number' ? v : String(v), outputSheet)
+      setCell(cellId(anchor.row + r, anchor.col + c), typeof v === 'number' ? v : String(v), outputSheet)
     }
   }
 }
@@ -291,9 +296,19 @@ export function createPivotEngine() {
 
   function add(config) {
     const id = config.id || _newId()
-    _pivots[id] = { ...config, id }
+    // anchor defaults go before the spread so an explicit anchor in `config`
+    // wins, while callers that pass none (and old configs) default to A1.
+    _pivots[id] = { anchorRow: 0, anchorCol: 0, ...config, id }
     _notify()
     return id
+  }
+
+  // Record the last-written output rectangle for a pivot. This is transient
+  // render state (recomputed on every render) — it is NOT persisted by
+  // snapshot(), so it never goes stale across reload/undo. Mutates without
+  // notifying since overlays read it via renderVersion, not pivotVersion.
+  function setExtent(id, extent) {
+    if (_pivots[id]) _pivots[id]._extent = extent
   }
 
   function update(id, config) {
@@ -316,14 +331,30 @@ export function createPivotEngine() {
     return Object.values(_pivots).some(p => p.sourceSheet === sheetName)
   }
 
-  function snapshot() { return { pivots: deepClone(_pivots), nextId: _nextId } }
+  // Strip the transient `_extent` render cache from each config so it's never
+  // persisted — a stale rectangle surviving reload/undo would mis-clear cells.
+  function snapshot() {
+    const pivots = {}
+    for (const [id, p] of Object.entries(_pivots)) {
+      const { _extent, ...rest } = p
+      pivots[id] = deepClone(rest)
+    }
+    return { pivots, nextId: _nextId }
+  }
 
   function restore(data) {
     if (!data) return
     _pivots = deepClone(data.pivots || {})
+    // Configs saved before anchors existed lack anchorRow/anchorCol; default
+    // them to A1. restore() bypasses add(), so it must default them itself.
+    // Use == null so a legitimately-stored 0 isn't re-defaulted.
+    for (const p of Object.values(_pivots)) {
+      if (p.anchorRow == null) p.anchorRow = 0
+      if (p.anchorCol == null) p.anchorCol = 0
+    }
     _nextId  = data.nextId  || 1
     _notify()
   }
 
-  return { add, update, remove, list, get, affectsPivot, snapshot, restore, setOnChange }
+  return { add, update, remove, list, get, affectsPivot, snapshot, restore, setOnChange, setExtent }
 }

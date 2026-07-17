@@ -31,7 +31,12 @@ def _unpack_rows(rows: dict) -> dict:
 	for r, arr in rows.items():
 		if not arr:
 			continue
-		row = int(r)
+		try:
+			row = int(r)
+		except (TypeError, ValueError):
+			continue
+		if not isinstance(arr, list):
+			continue
 		for col, value in enumerate(arr):
 			if value is None or value == "":
 				continue

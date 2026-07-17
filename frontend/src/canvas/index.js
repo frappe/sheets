@@ -9,11 +9,31 @@ import { CHIP, chipMetrics } from './chip-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getRightInset, onHyperlinkClick, onDropdownClick, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false } = {}) {
   const ctx = canvas.getContext('2d')
   const dpr = window.devicePixelRatio || 1
 
   const data = {}
+
+  // ── Value-source seam (lazy-viewport cutover) ────────────────────────────────
+  // Legacy/eager path reads the grid's own `data` cache, populated wholesale by
+  // the host's repopulate. Lazy path pulls each cell's display string from the
+  // host's `getDisplay` on demand, so switch/load cost no longer scales with
+  // total cell count — the grid only ever touches visible cells plus the cells
+  // a cold-path scan (Cmd+Arrow, Cmd+A, autofit) walks.
+  //
+  // Three seams, used everywhere instead of touching `data` directly:
+  //   getValue(id) — display string for a cell
+  //   hasVal(id)   — is the cell non-empty (matches the legacy `!!data[id]`)
+  //   cellIds()    — every non-empty cell id on the current sheet
+  // In eager mode they read `data`; in lazy mode they read the engine via the
+  // host callbacks. Flipping `_lazyValues` is the cutover.
+  let _lazyValues = lazyValues && typeof getDisplay === 'function'
+  const getValue = id => _lazyValues ? getDisplay(id) : data[id]
+  const hasVal   = id => !!getValue(id)
+  const cellIds  = () => _lazyValues ? (getCellIds ? getCellIds() : []) : Object.keys(data)
+  function setLazyValues(on) { _lazyValues = !!on && typeof getDisplay === 'function'; render() }
+  function isLazyValues() { return _lazyValues }
   const colW = {}
   const rowH = {}
 
@@ -89,7 +109,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   }
 
   function render() {
-    renderer.render({ cssW, cssH, data, sel, selEnd, selMode, editing, getFormat, freeze, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor: _diffCells ? _getDiffFor : null, marchAnts, marchPhase, pickerRect, zoom: _zoom })
+    renderer.render({ cssW, cssH, getValue, sel, selEnd, selMode, editing, getFormat, freeze, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getRightInset, getDiffFor: _diffCells ? _getDiffFor : null, marchAnts, marchPhase, pickerRect, zoom: _zoom })
     for (const cb of _renderListeners) cb()
   }
 
@@ -221,16 +241,16 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   // Jump to data-region edge (Cmd+Arrow behaviour matching Google Sheets)
   function _jumpEdge(startR, startC, dr, dc) {
     const maxR = TOTAL_ROWS - 1, maxC = TOTAL_COLS - 1
-    const curFilled = !!data[cellId(startR, startC)]
+    const curFilled = hasVal(cellId(startR, startC))
     let nr = Math.max(0, Math.min(maxR, startR + dr))
     let nc = Math.max(0, Math.min(maxC, startC + dc))
-    if (curFilled && !!data[cellId(nr, nc)]) {
+    if (curFilled && hasVal(cellId(nr, nc))) {
       // Scan forward to end of contiguous block
       let r = startR, c = startC
       while (true) {
         const tr = r + dr, tc = c + dc
         if (tr < 0 || tr > maxR || tc < 0 || tc > maxC) break
-        if (!data[cellId(tr, tc)]) break
+        if (!hasVal(cellId(tr, tc))) break
         r = tr; c = tc
       }
       return { r, c }
@@ -238,7 +258,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       // Scan forward to next filled cell
       let r = startR + dr, c = startC + dc
       while (r >= 0 && r <= maxR && c >= 0 && c <= maxC) {
-        if (data[cellId(r, c)]) return { r, c }
+        if (hasVal(cellId(r, c))) return { r, c }
         r += dr; c += dc
       }
       // No filled cell — go to grid boundary
@@ -251,7 +271,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   function _lastUsedCell() {
     let maxR = 0, maxC = 0
-    for (const id of Object.keys(data)) {
+    for (const id of cellIds()) {
       const p = parseCellId(id)
       if (p) { if (p.row > maxR) maxR = p.row; if (p.col > maxC) maxC = p.col }
     }
@@ -764,17 +784,16 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   // Double-click-fill extent: pick a non-empty neighbour column (left, then
   // right) and walk its contiguous run starting at r1+1 — Google Sheets rule.
   function _autoFillDownExtent(src) {
-    const hasVal = (r, c) => {
+    const filled = (r, c) => {
       if (r < 0 || r >= TOTAL_ROWS || c < 0 || c >= TOTAL_COLS) return false
-      const v = data[cellId(r, c)]
-      return v != null && v !== ''
+      return hasVal(cellId(r, c))
     }
     let anchor = null
-    if (hasVal(src.r1 + 1, src.c0 - 1))      anchor = src.c0 - 1
-    else if (hasVal(src.r1 + 1, src.c1 + 1)) anchor = src.c1 + 1
+    if (filled(src.r1 + 1, src.c0 - 1))      anchor = src.c0 - 1
+    else if (filled(src.r1 + 1, src.c1 + 1)) anchor = src.c1 + 1
     if (anchor === null) return src.r1
     let r = src.r1 + 1
-    while (r < TOTAL_ROWS && hasVal(r, anchor)) r++
+    while (r < TOTAL_ROWS && filled(r, anchor)) r++
     return r - 1
   }
 
@@ -797,10 +816,10 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     const MIN_W      = 40
     const MAX_W      = 600
     let widest = _measureWidth(colLabel(c), { bold: true }) + HEADER_PAD
-    for (const id of Object.keys(data)) {
+    for (const id of cellIds()) {
       const p = parseCellId(id)
       if (!p || p.col !== c) continue
-      const val = data[id]
+      const val = getValue(id)
       if (val == null || val === '') continue
       const fmt = getFormat ? getFormat(id) : {}
       // Skip wrap-text columns — they auto-grow rows, not cols.
@@ -818,10 +837,10 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     const MIN_H   = DEFAULT_ROW_H
     const MAX_H   = 400
     let tallest = MIN_H
-    for (const id of Object.keys(data)) {
+    for (const id of cellIds()) {
       const p = parseCellId(id)
       if (!p || p.row !== r) continue
-      const val = data[id]
+      const val = getValue(id)
       if (val == null || val === '') continue
       const fmt = getFormat ? getFormat(id) : {}
       let h = 18 // single line height at 13px
@@ -1021,7 +1040,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       const x = geo.colX(h.c), y = geo.rowY(h.r)
       const w = geo.cw(h.c), cellRight = x + w
       const lx = (e.clientX - rect.left) / _zoom
-      const val = data[hId]
+      const val = getValue(hId)
       let caretL = cellRight - 14
       if (val != null && String(val) !== '') {
         const { offsetX, chipW } = chipMetrics(ctx, String(val), getFormat?.(hId) || {}, w)
@@ -1084,7 +1103,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     // instead of editing the (regenerated) cell. The handler returns true
     // when it took over.
     if (onPivotDrill?.(h.r, h.c)) return
-    showEditor(data[cellId(h.r, h.c)] ?? '', 'edit')
+    showEditor(getValue(cellId(h.r, h.c)) ?? '', 'edit')
   })
 
   canvas.addEventListener('mousemove', e => {
@@ -1261,7 +1280,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if (mod && (e.key === 'a' || e.key === 'A')) {
       e.preventDefault()
       const last = _lastUsedCell()
-      const hasData = last.r > 0 || last.c > 0 || data[cellId(0, 0)] !== undefined
+      const hasData = last.r > 0 || last.c > 0 || hasVal(cellId(0, 0))
       const cur = getSelRange()
       const onDataRegion = hasData
         && cur.r0 === 0 && cur.c0 === 0
@@ -1306,7 +1325,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       return
     }
 
-    if (e.key === 'F2') { e.preventDefault(); showEditor(data[cellId(r, c)] ?? '', 'edit'); return }
+    if (e.key === 'F2') { e.preventDefault(); showEditor(getValue(cellId(r, c)) ?? '', 'edit'); return }
 
     if ((e.key === 'Delete' || e.key === 'Backspace') && !mod) {
       e.preventDefault()
@@ -1393,16 +1412,23 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     render()
   }
 
+  // In lazy mode the grid owns no value cache — getValue pulls from the engine,
+  // which the host has already updated before calling here — so these just
+  // schedule a repaint. In eager mode they keep the `data` cache current.
   function setCell(id, value) {
-    if (!value && value !== 0) delete data[id]
-    else data[id] = value
+    if (!_lazyValues) {
+      if (!value && value !== 0) delete data[id]
+      else data[id] = value
+    }
     scheduleRender()
   }
 
   function batchSetCells(map) {
-    for (const [id, value] of Object.entries(map)) {
-      if (!value && value !== 0) delete data[id]
-      else data[id] = value
+    if (!_lazyValues) {
+      for (const [id, value] of Object.entries(map)) {
+        if (!value && value !== 0) delete data[id]
+        else data[id] = value
+      }
     }
     scheduleRender()
   }
@@ -1573,7 +1599,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   return {
     resize, render, setCell, batchSetCells, clearAll,
-    getCell: id => data[id] ?? '',
+    getCell: id => getValue(id) ?? '',
     getActiveCell: () => cellId(sel.r, sel.c),
     // Whether the in-cell overlay is currently editing a `=…` formula —
     // SheetEditor uses this to keep the editor alive across sheet-tab clicks
@@ -1600,6 +1626,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     expandCols, getTotalCols,
     setZoom, getZoom,
     viewSnapshot, viewRestore,
+    setLazyValues, isLazyValues,
     destroy,
   }
 }
