@@ -1,4 +1,5 @@
 import { colLabel, parseCellId } from '../../utils/cells.js'
+import { toXlsxCell, fromXlsxCell, mergesToXlsx, mergesFromXlsx } from '../../engine/xlsx-io.js'
 
 // ── private helpers ────────────────────────────────────────────────────────────
 
@@ -74,8 +75,12 @@ export function useExportImport({
   getSheet,
   getCurrentTitle,
   getGrid,
+  getFormats,
+  getMerge,
   queueOp,
   repopulateGrid,
+  syncNames,
+  switchSheet,
   syncFlags,
   isDirty,
 }) {
@@ -103,15 +108,56 @@ export function useExportImport({
     a.click()
   }
 
+  // Build a SheetJS worksheet from one sub-sheet, preserving value types,
+  // formulas (with their computed value), number formats, and merges — the
+  // lossy display-string path only round-tripped visible text.
+  function _buildWorksheet(sheet, formats, merge, sn) {
+    const data = sheet.getRawData(sn)
+    const ws = {}
+    let maxR = 0, maxC = 0
+    for (const [id, raw] of Object.entries(data)) {
+      const p = parseCellId(id)
+      if (!p) continue
+      const isFormula = typeof raw === 'string' && raw.startsWith('=')
+      const computed  = isFormula ? sheet.getCellValue(id, sn) : null
+      const fmt  = formats?.get(id, sn)?.numberFormat || ''
+      const cell = toXlsxCell(raw, computed, fmt)
+      if (!cell) continue
+      ws[id] = cell
+      if (p.row > maxR) maxR = p.row
+      if (p.col > maxC) maxC = p.col
+    }
+    ws['!ref'] = `A1:${colLabel(maxC)}${maxR + 1}`
+    const merges = merge ? mergesToXlsx(merge.snapshot()?.[sn]?.masterMap) : []
+    if (merges.length) ws['!merges'] = merges
+    return ws
+  }
+
   async function exportXLSX() {
-    const sheet = getSheet()
+    const sheet   = getSheet()
+    const formats = getFormats?.()
+    const merge   = getMerge?.()
     const { utils, writeFile } = await import('xlsx')
     const wb = utils.book_new()
+    const used = new Set()
     for (const sn of sheet.getSheetNames()) {
-      const ws = utils.aoa_to_sheet(_sheetToAoa(sn, sheet))
-      utils.book_append_sheet(wb, ws, sn)
+      const ws = _buildWorksheet(sheet, formats, merge, sn)
+      utils.book_append_sheet(wb, ws, _excelSheetName(sn, used))
     }
     writeFile(wb, `${getCurrentTitle() || 'sheet'}.xlsx`)
+  }
+
+  // Excel caps sheet names at 31 chars, bans []:*?/\ and duplicates. Coerce to
+  // a safe, unique name so book_append_sheet never throws mid-export.
+  function _excelSheetName(name, used) {
+    let base = String(name || 'Sheet').replace(/[[\]:*?/\\]/g, ' ').slice(0, 31).trim() || 'Sheet'
+    let out = base, n = 1
+    while (used.has(out.toLowerCase())) {
+      const suffix = ` (${++n})`
+      out = base.slice(0, 31 - suffix.length) + suffix
+    }
+    used.add(out.toLowerCase())
+    return out
   }
 
   function exportPDF() {
@@ -180,13 +226,80 @@ export function useExportImport({
   async function importXLSX(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    const { read, utils } = await import('xlsx')
-    const buf  = await file.arrayBuffer()
-    const wb   = read(buf, { type: 'array' })
-    const ws   = wb.Sheets[wb.SheetNames[0]]
-    const rows = utils.sheet_to_json(ws, { header: 1, defval: '' })
-    await _ingestRows(rows, file.name)
-    e.target.value = ''
+    try {
+      const { read } = await import('xlsx')
+      const buf = await file.arrayBuffer()
+      // cellFormula keeps `=…`, cellDates yields Date objects, cellNF keeps the
+      // number-format code — all three are what makes the import lossless.
+      const wb = read(buf, { type: 'array', cellFormula: true, cellDates: true, cellNF: true })
+      await _ingestWorkbook(wb)
+    } finally {
+      e.target.value = ''   // always reset so re-picking the same file re-fires
+    }
+  }
+
+  // Import every worksheet as a NEW sub-sheet — non-destructive, so the user's
+  // current sheets are untouched. Each cell carries its value/formula, number
+  // format, and the sheet's merges.
+  async function _ingestWorkbook(wb) {
+    const sheet    = getSheet()
+    const formats  = getFormats?.()
+    const merge    = getMerge?.()
+    const existing = new Set(sheet.getSheetNames().map(n => n.toLowerCase()))
+    let firstAdded = null
+    // finally: even if a worksheet throws mid-import, resync the tab bar so the
+    // engine and UI never disagree about which sheets exist, and surface what
+    // was already ingested.
+    try {
+      for (const wsName of wb.SheetNames) {
+        const ws = wb.Sheets[wsName]
+        if (!ws) continue
+        const name = _uniqueSheetName(wsName, existing)
+        existing.add(name.toLowerCase())
+        sheet.addSheet(name)
+        if (!firstAdded) firstAdded = name
+        await _ingestWorksheet(ws, sheet, formats, merge, name)
+      }
+    } finally {
+      // Always resync the tab bar so engine + UI agree even after a partial
+      // import; only dirty the doc when a sheet was actually added (an empty
+      // workbook, or a throw before the first add, must not mark it dirty).
+      syncNames?.()
+      if (firstAdded) {
+        switchSheet?.(firstAdded)
+        syncFlags()
+        isDirty.value = true
+      } else {
+        repopulateGrid()
+      }
+    }
+  }
+
+  async function _ingestWorksheet(ws, sheet, formats, merge, name) {
+    const map = {}
+    const fmts = []
+    let n = 0
+    for (const [id, cell] of Object.entries(ws)) {
+      if (id[0] === '!') continue                  // !ref, !merges, !cols meta keys
+      if (!parseCellId(id)) continue
+      const { value, fmt } = fromXlsxCell(cell)
+      if (value !== '' && value != null) map[id] = value
+      if (fmt) fmts.push([id, fmt])
+      if (++n % CHUNK_ROWS === 0) await _yield()
+    }
+    sheet.batchSetCells(map, name, { replace: false })
+    if (formats) for (const [id, fmt] of fmts) formats.set(id, { numberFormat: fmt }, name)
+    if (merge && Array.isArray(ws['!merges'])) {
+      for (const { r0, c0, r1, c1 } of mergesFromXlsx(ws['!merges'])) merge.merge(r0, c0, r1, c1, name)
+    }
+  }
+
+  // Ensure an imported worksheet name doesn't collide with an existing sheet.
+  function _uniqueSheetName(name, existing) {
+    const base = String(name || 'Sheet').trim() || 'Sheet'
+    let out = base, n = 1
+    while (existing.has(out.toLowerCase())) out = `${base} (${++n})`
+    return out
   }
 
   function importCSV(e) {

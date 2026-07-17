@@ -1935,8 +1935,13 @@ const { exportCSV, exportXLSX, exportPDF, importCSV, importXLSX } = useExportImp
   getSheet:        () => sheet,
   getCurrentTitle: () => currentTitle.value,
   getGrid:         () => grid,
+  getFormats:      () => formats,
+  getMerge:        () => merge,
   queueOp:         _queueOp,
   repopulateGrid:  _repopulateGrid,
+  // Defined later by useSheetTabs — lazy-wrapped so they resolve at call time.
+  syncNames:       () => syncNames(),
+  switchSheet:     (n) => switchSheet(n),
   syncFlags,
   isDirty,
 })
