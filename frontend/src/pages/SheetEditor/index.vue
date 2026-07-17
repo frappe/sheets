@@ -1029,19 +1029,19 @@
     <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
          :style="{ left: sl.x + 'px', top: sl.y + 'px' }">
       <div class="sn-slicer-head" @mousedown="startSlicerDrag(sl, $event)">
-        <span class="sn-slicer-title">{{ slicerLabel(sl) }}</span>
+        <span class="sn-slicer-title">{{ sl.label }}</span>
         <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
                 @mousedown.stop @click="removeSlicer(sl)" />
       </div>
       <div class="sn-slicer-values">
         <div class="sn-fp-value-row sn-slicer-all-row" @click="toggleSlicerAll(sl)">
-          <Checkbox :modelValue="slicerAllChecked(sl)" @update:modelValue="toggleSlicerAll(sl)" @click.stop />
+          <Checkbox :modelValue="sl.allChecked" @update:modelValue="toggleSlicerAll(sl)" @click.stop />
           <span class="sn-fp-value-text">Select all</span>
         </div>
-        <div v-for="v in slicerValues(sl)" :key="v || '__blanks__'"
-             class="sn-fp-value-row" @click="toggleSlicerValue(sl, v)">
-          <Checkbox :modelValue="slicerChecked(sl, v)" @update:modelValue="toggleSlicerValue(sl, v)" @click.stop />
-          <span class="sn-fp-value-text">{{ v === '' ? '(Blanks)' : v }}</span>
+        <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
+             class="sn-fp-value-row" @click="toggleSlicerValue(sl, row.v)">
+          <Checkbox :modelValue="row.checked" @update:modelValue="toggleSlicerValue(sl, row.v)" @click.stop />
+          <span class="sn-fp-value-text">{{ row.v === '' ? '(Blanks)' : row.v }}</span>
         </div>
       </div>
     </div>
@@ -4725,12 +4725,30 @@ function _removeFilter() {
 const slicerVersion = ref(0)
 let _slicerDrag = null
 
-const activeSlicers = computed(() => { slicerVersion.value; return [...slicers.list(currentSheet.value)] })
+// One reactive snapshot per slicer: values + PLAIN boolean checked flags, all
+// derived together on each slicerVersion bump. The template binds the checkboxes
+// to these booleans (not to function calls over the non-reactive sortFilter
+// engine), so "Select all" and the value rows can never disagree.
+const activeSlicers = computed(() => {
+  slicerVersion.value
+  const sn = currentSheet.value
+  return slicers.list(sn).map(sl => {
+    const values = sortFilter.getColumnValues(sl.col, sn)
+    const spec   = sortFilter.getFilterConfig(sn)[sl.col]
+    const set    = spec?.operator === 'inSet' ? new Set(spec.values) : null   // null → unfiltered
+    return {
+      id: sl.id, col: sl.col, x: sl.x, y: sl.y,
+      label: slicerLabel(sl, sn),
+      allChecked: !set,
+      rows: values.map(v => ({ v, checked: !set || set.has(v) })),
+    }
+  })
+})
 
 function slicerValues(sl) { return sortFilter.getColumnValues(sl.col, sheet.getCurrentSheet()) }
-function slicerLabel(sl) {
-  const range = sortFilter.getRange(sheet.getCurrentSheet())
-  const header = range ? sheet.getDisplayValue(colLabel(sl.col) + (range.r0 + 1), sheet.getCurrentSheet()) : ''
+function slicerLabel(sl, sn = sheet.getCurrentSheet()) {
+  const range = sortFilter.getRange(sn)
+  const header = range ? sheet.getDisplayValue(colLabel(sl.col) + (range.r0 + 1), sn) : ''
   return header || colLabel(sl.col)
 }
 // The set of values currently kept visible, or null when the column is unfiltered.
@@ -4738,8 +4756,6 @@ function _slicerCheckedSet(sl) {
   const spec = sortFilter.getFilterConfig(sheet.getCurrentSheet())[sl.col]
   return spec?.operator === 'inSet' ? new Set(spec.values) : null
 }
-function slicerChecked(sl, v) { const set = _slicerCheckedSet(sl); return !set || set.has(v) }
-function slicerAllChecked(sl)  { return !_slicerCheckedSet(sl) }
 function toggleSlicerValue(sl, v) {
   const all = slicerValues(sl)
   const set = _slicerCheckedSet(sl) || new Set(all)
@@ -4748,7 +4764,9 @@ function toggleSlicerValue(sl, v) {
 }
 function toggleSlicerAll(sl) {
   const all = slicerValues(sl)
-  _applySlicerFilter(sl, slicerAllChecked(sl) ? new Set() : new Set(all), all)
+  // sl.allChecked is the live snapshot from activeSlicers — checked → clear to
+  // none, unchecked → select all (clears the filter).
+  _applySlicerFilter(sl, sl.allChecked ? new Set() : new Set(all), all)
 }
 function _applySlicerFilter(sl, set, all) {
   const sn = sheet.getCurrentSheet()
