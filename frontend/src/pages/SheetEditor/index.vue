@@ -1029,10 +1029,13 @@
     <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
          :style="{ left: sl.x + 'px', top: sl.y + 'px' }">
       <div class="sn-slicer-head" @mousedown="startSlicerDrag(sl, $event)">
-        <FormControl type="select" size="sm" class="sn-slicer-colsel"
-                     :modelValue="String(sl.col)" :options="sl.options"
-                     @update:modelValue="changeSlicerColumn(sl, $event)"
-                     @mousedown.stop @click.stop />
+        <Dropdown :options="slicerColMenu(sl)" placement="bottom-start" class="sn-slicer-colsel">
+          <template #default="{ open }">
+            <Button :variant="open ? 'subtle' : 'ghost'" size="sm" iconRight="chevron-down"
+                    :label="sl.label" tooltip="Filter column"
+                    @mousedown.stop @click.stop />
+          </template>
+        </Dropdown>
         <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
                 @mousedown.stop @click="removeSlicer(sl)" />
       </div>
@@ -4753,15 +4756,25 @@ const activeSlicers = computed(() => {
   })
 })
 
-// Every column of the filter range, as { label: header, value: 'colIdx' } for
-// the header dropdown. Values are strings — FormControl selects emit strings.
+// Every column of the filter range, as { label: header, value: colIdx } — the
+// raw list the header dropdown is built from.
 function _slicerColumnOptions(range, sn) {
   const opts = []
   for (let c = range.c0; c <= range.c1; c++) {
     const header = sheet.getDisplayValue(colLabel(c) + (range.r0 + 1), sn)
-    opts.push({ label: header || colLabel(c), value: String(c) })
+    opts.push({ label: header || colLabel(c), value: c })
   }
   return opts
+}
+// frappe-ui Dropdown options for a slicer's column picker — a styled, teleported
+// popover (not a native <select>, which overflowed the floating panel). The
+// current column is marked so the menu reads like a real selector.
+function slicerColMenu(sl) {
+  return sl.options.map(o => ({
+    label: o.label,
+    icon: o.value === sl.col ? 'check' : null,
+    onClick: () => changeSlicerColumn(sl, o.value),
+  }))
 }
 
 function slicerValues(sl) { return sortFilter.getColumnValues(sl.col, sheet.getCurrentSheet()) }
@@ -6070,8 +6083,9 @@ function toggleShowFormulas() {
 /* Slicers — floating value-filter controls (matches the filter panel shell) */
 .sn-slicer        { position:fixed; z-index:8400; width:220px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 0 1px rgba(0,0,0,.35), 0 6px 8px -4px rgba(0,0,0,.1); padding:10px; display:flex; flex-direction:column; gap:8px; }
 .sn-slicer-head   { display:flex; align-items:center; gap:6px; cursor:move; user-select:none; }
-.sn-slicer-colsel { flex:1 1 auto; min-width:0; cursor:pointer; }
-.sn-slicer-colsel :deep(select) { font-weight:600; }
+.sn-slicer-colsel { flex:1 1 auto; min-width:0; }
+.sn-slicer-colsel :deep(button) { width:100%; justify-content:space-between; font-weight:600; }
+.sn-slicer-colsel :deep(button > span) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sn-slicer-actions { display:flex; align-items:center; gap:6px; padding:0 2px; }
 .sn-slicer-link   { font-size:11px; font-weight:500; color:var(--ink-blue-500, #2563eb); background:none; border:0; padding:0; cursor:pointer; }
 .sn-slicer-link:hover:not(:disabled) { text-decoration:underline; }
