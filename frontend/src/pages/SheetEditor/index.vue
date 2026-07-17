@@ -81,6 +81,7 @@
             <template #prefix><FeatherIcon name="eye" class="h-3.5 w-3.5" /></template>
           </Badge>
         </Tooltip>
+        <Badge v-if="protectionNotice" theme="gray" variant="subtle" size="sm" :label="protectionNotice" :tooltip="protectionNotice" />
       </div>
       <div class="sn-topbar-right">
         <!-- AI Assist entry point — shown only when an admin has configured a
@@ -680,6 +681,7 @@
     <div v-if="tabMenu.open" class="sn-ctx-menu" :style="{ left: tabMenu.x + 'px', bottom: tabMenu.bottom + 'px' }">
       <Button variant="ghost" size="sm" iconLeft="edit-2"  label="Rename"    @click="openRenameDialog(tabMenu.name)" />
       <Button variant="ghost" size="sm" iconLeft="copy"    label="Duplicate" @click="doDuplicateSheet(tabMenu.name)" />
+      <Button variant="ghost" size="sm" :iconLeft="tabMenuSheetLocked() ? 'unlock' : 'lock'" :label="tabMenuSheetLocked() ? 'Unprotect sheet' : 'Protect sheet'" @click="toggleSheetProtection(tabMenu.name)" />
       <Button
         variant="ghost"
         size="sm"
@@ -761,6 +763,8 @@
         <hr class="sn-ctx-sep" />
         <Button variant="ghost" size="sm" iconLeft="check-square"   label="Data validation…" @click="contextMenu.open=false; openValidationDialog()" />
         <Button variant="ghost" size="sm" iconLeft="blend"          label="Conditional format…" @click="contextMenu.open=false; openCfDialog(null)" />
+        <Button v-if="!selectionHasProtectedRange()" variant="ghost" size="sm" iconLeft="lock"   label="Protect range"     @click="protectSelection()" />
+        <Button v-else                               variant="ghost" size="sm" iconLeft="unlock" label="Remove protection" @click="unprotectSelection()" />
         <hr class="sn-ctx-sep" />
         <Button variant="ghost" size="sm" iconLeft="columns"        label="Split text to columns" @click="doSplitTextToColumns()" />
         <hr class="sn-ctx-sep" />
@@ -832,6 +836,7 @@
       v-if="showFindReplace"
       :sheet="sheet"
       :grid="grid"
+      :is-protected="(id) => _cellSilentlyProtected(id)"
       @close="showFindReplace = false"
       @navigate-to="onNavigateTo"
     />
@@ -954,6 +959,34 @@
         <div class="flex flex-row-reverse gap-2">
           <Button variant="solid" @click="confirmInsertMany">Insert</Button>
           <Button @click="showInsertManyDialog = false">Cancel</Button>
+        </div>
+      </template>
+    </Dialog>
+
+    <!-- Custom number-format dialog -->
+    <Dialog v-model="customFormatDialog.open" :options="{ title: 'Custom number format', size: 'sm' }">
+      <template #body-content>
+        <div class="sn-form-stack">
+          <FormControl
+            v-model="customFormatDialog.pattern"
+            label="Format code"
+            placeholder="#,##0.00"
+            @keydown.enter="confirmCustomFormat"
+          />
+          <div class="text-sm text-ink-gray-6">
+            Preview: <span class="font-medium text-ink-gray-9">{{ customFormatPreview || '—' }}</span>
+          </div>
+          <div class="text-xs text-ink-gray-5 leading-relaxed">
+            <code>0</code> padded digit · <code>#</code> optional digit · <code>,</code> thousands ·
+            <code>.</code> decimal · <code>%</code> percent · <code>"text"</code> literal.
+            e.g. <code>#,##0.00</code>, <code>0.0%</code>, <code>"$"#,##0</code>
+          </div>
+        </div>
+      </template>
+      <template #actions>
+        <div class="flex flex-row-reverse gap-2">
+          <Button variant="solid" @click="confirmCustomFormat">Apply</Button>
+          <Button @click="customFormatDialog.open = false">Cancel</Button>
         </div>
       </template>
     </Dialog>
@@ -1166,6 +1199,7 @@ import { createClipboard }     from '../../engine/clipboard.js'
 import { createSortFilter }    from '../../engine/sortFilter.js'
 import { createCommentsEngine }  from '../../engine/comments.js'
 import { createValidationEngine } from '../../engine/validation.js'
+import { createProtectionEngine } from '../../engine/protection.js'
 import { chipColor } from '../../canvas/chip-geometry.js'
 import { createCondFormatEngine } from '../../engine/cond-format.js'
 import { useToolbar }          from './useToolbar.js'
@@ -1258,9 +1292,10 @@ const merge      = createMergeEngine()
 const sortFilter = createSortFilter(sheet)
 const comments   = createCommentsEngine()
 const validation = createValidationEngine()
+const protection = createProtectionEngine()
 const condFormat = createCondFormatEngine()
 const clipboard  = createClipboard({
-  sheet, formats, condFormat, validation,
+  sheet, formats, condFormat, validation, protection,
   // Late-bound to the pivot integration (declared below). Only invoked at
   // copy/paste time, long after setup runs, so the forward reference is safe.
   getPivotAt: (sel, sn) => getPivotAt(sel, sn),
@@ -1340,6 +1375,7 @@ const history = createHistory({
       sortFilter:   sortFilter.snapshot(),
       comments:     comments.snapshot(),
       validation:   validation.snapshot(),
+      protection:   protection.snapshot(),
       condFormat:   condFormat.snapshot(),
       pivot:        pivot.snapshot(),
       charts:       charts.snapshot(),
@@ -1364,6 +1400,7 @@ const history = createHistory({
     if (snap.sortFilter)  sortFilter.restore(snap.sortFilter)
     if (snap.comments)    comments.restore(snap.comments)
     if (snap.validation)  validation.restore(snap.validation)
+    if (snap.protection)  protection.restore(snap.protection)
     if (snap.condFormat)  condFormat.restore(snap.condFormat)
     if (snap.pivot)       pivot.restore(snap.pivot)
     if (snap.charts)      charts.restore(snap.charts)
@@ -1836,7 +1873,11 @@ async function onAskSubmit(promptText) {
 // Returns the number of cells written.
 function _applyAiActions(actions) {
   const sn = sheet.getCurrentSheet()
-  const setCells = actions.filter(a => a.type === 'setCell')
+  let setCells = actions.filter(a => a.type === 'setCell')
+  // Drop writes that land on protected cells (rest still apply).
+  const allowed = setCells.filter(a => !_cellSilentlyProtected(a.cell, sn))
+  if (allowed.length !== setCells.length) _flashProtected(sn)
+  setCells = allowed
   if (!setCells.length) return 0
 
   const before = {}
@@ -2180,6 +2221,30 @@ const _FORMAT_LABELS = (() => {
   return m
 })()
 
+// Custom number-format dialog. `pattern` is a raw Excel-style code; it's
+// stored as `custom:<pattern>` so the display path routes it to applyCustomFmt.
+const customFormatDialog = reactive({ open: false, pattern: '' })
+
+function openCustomFormatDialog() {
+  const cur = parseNumberFmt(activeNumberFormat.value)
+  customFormatDialog.pattern = cur.type === 'custom' ? cur.pattern : '#,##0.00'
+  customFormatDialog.open = true
+}
+
+// Live preview against a representative value so the user sees the effect
+// before applying. Falls back to empty on a pattern that throws.
+const customFormatPreview = computed(() => {
+  const p = customFormatDialog.pattern.trim()
+  if (!p) return ''
+  try { return applyNumberFmt(1234.567, 'custom:' + p) } catch { return '' }
+})
+
+function confirmCustomFormat() {
+  const p = customFormatDialog.pattern.trim()
+  if (p) onNumberFormatChange('custom:' + p)
+  customFormatDialog.open = false
+}
+
 const numberFormatLabel = computed(() => {
   const cur = activeNumberFormat.value
   if (_FORMAT_LABELS.has(cur)) return _FORMAT_LABELS.get(cur)
@@ -2194,15 +2259,18 @@ const numberFormatLabel = computed(() => {
   return type[0].toUpperCase() + type.slice(1)
 })
 
-const numberFormatDropdownOptions = computed(() =>
-  NUMBER_FORMAT_GROUPS.map(g => ({
+const numberFormatDropdownOptions = computed(() => [
+  ...NUMBER_FORMAT_GROUPS.map(g => ({
     group: g.group,
     items: g.items.map(it => ({
       label: it.label,
       onClick: () => onNumberFormatChange(activeNumberFormat.value === it.value ? '' : it.value),
     })),
-  }))
-)
+  })),
+  { group: 'Custom', items: [
+    { label: 'Custom format…', onClick: () => openCustomFormatDialog() },
+  ]},
+])
 
 // Active currency code (for the $-button symbol). Defaults to $ when the cell
 // isn't a currency at all, so the button always says *something* clickable.
@@ -2272,7 +2340,7 @@ const textWrapDropdownOptions = computed(() => [
 let _sheetTabs = null
 const { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
-    sheet, formats, merge, comments, validation, condFormat, sortFilter, pivot,
+    sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot,
     charts, namedRanges,
     getViewState:   () => _sheetTabs?.viewSnapshot?.() ?? grid?.viewSnapshot?.(),
     applyViewState: (s) => {
@@ -2289,7 +2357,7 @@ const { isSaving, saveError, canWrite, loadError, loadSheet, autoCreate, saveExi
 // can't persist (and never triggers the server's PermissionError on save).
 const readOnly = computed(() => !canWrite.value)
 
-_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
+_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
     _repopulateGrid()
     grid?.setMarchingAnts(null); clipboard.clear(); clipboardHas.value = false
@@ -2393,6 +2461,7 @@ const {
   getMerge:       () => merge,
   getComments:    () => comments,
   getValidation:  () => validation,
+  getProtection:  () => protection,
   getCondFormat:  () => condFormat,
   getSortFilter:  () => sortFilter,
   getGrid:        () => grid,
@@ -2427,6 +2496,7 @@ const {
   syncFlags,
   captureRange:   _captureRange,
   diffRefs:       _diffRefs,
+  blockProtected: (rect, sn) => _rectBlocked(rect, sn),
 })
 
 // `showSortFilter` is the existing template/handler API; with ranged filters
@@ -2994,6 +3064,16 @@ function _setupGridInstance() {
       const homeSheet = editingHomeSheet.value
       const writeSheet = (homeSheet && homeSheet !== sheet.getCurrentSheet()) ? homeSheet : sheet.getCurrentSheet()
 
+      // Protection first — blocks writes AND clears (empty value) on a locked
+      // cell. Nothing was written, so repaint the pre-edit value and bail.
+      if (_cellBlocked(id, writeSheet)) {
+        grid?.render?.()
+        editingHomeSheet.value = null
+        editingHomeCell.value  = null
+        syncFlags()
+        return
+      }
+
       // Enforce data validation rules. The engine stores rules in the snapshot
       // and the canvas paints a dropdown arrow for `list` rules, but until
       // now nothing surfaced number / text_length rejection — so "between 1
@@ -3100,13 +3180,17 @@ function _setupGridInstance() {
     // active cross-sheet edit, in which case the prefix is omitted.
     getCurrentSheet()    { return sheet.getCurrentSheet() },
     getEditingHomeSheet() { return editingHomeSheet.value },
+    isCellEditable: (r, c) => !protection.isProtected(r, c, sheet.getCurrentSheet()),
+    onBlockedEdit: () => _flashProtected(sheet.getCurrentSheet()),
     onFill(src, total, { withModifier = false } = {}) {
+      if (_fillDestBlocked(src, total)) return   // only the destination cells, not the source
       const series = _previewSeriesKind(src)
       // Cmd/Ctrl held inverts the auto-detected mode — Google Sheets behaviour.
       const mode = withModifier ? (series ? 'copy' : 'series') : 'auto'
       _runFill(src, total, mode)
     },
     onBatchCommit(cells) {
+      if (_cellsBlocked(cells.map(c => c.id))) return
       const { before, after, refs } = diffCells(cells, id => sheet.getCell(id))
       for (const { id, value } of cells) sheet.setCell(id, value)
       if (refs.length) {
@@ -3376,6 +3460,103 @@ function _pasteAffectedRects(destSel) {
 	return rects
 }
 
+// ── Protection enforcement ────────────────────────────────────────────────────
+// The single gate every user-initiated write consults. Each helper returns true
+// — and flashes a transient notice — when the target is protected, so callers
+// bail with `if (…) return`. Programmatic paths (undo/restore/collab) never call
+// these, so they can still rewrite protected cells.
+//
+// A dedicated notice ref — NOT saveError — so a "protected" message renders as a
+// neutral badge and doesn't arm the save-error watchdog / retry affordance.
+const protectionNotice = ref('')
+function _flashProtected(sn) {
+  const msg = protection.isSheetLocked(sn)
+    ? 'This sheet is protected'
+    : 'This range is protected and can’t be edited'
+  protectionNotice.value = msg
+  setTimeout(() => { if (protectionNotice.value === msg) protectionNotice.value = '' }, 3500)
+}
+function _rectBlocked(rect, sn = sheet.getCurrentSheet()) {
+  if (!rect || !protection.isAnyProtected(rect, sn)) return false
+  _flashProtected(sn); return true
+}
+function _cellBlocked(id, sn = sheet.getCurrentSheet()) {
+  const p = parseCellId(id)
+  if (!p || !protection.isProtected(p.row, p.col, sn)) return false
+  _flashProtected(sn); return true
+}
+function _cellsBlocked(ids, sn = sheet.getCurrentSheet()) {
+  const hit = ids.some(id => _cellSilentlyProtected(id, sn))
+  if (hit) _flashProtected(sn)
+  return hit
+}
+function _cellSilentlyProtected(id, sn = sheet.getCurrentSheet()) {
+  const p = parseCellId(id)
+  return !!(p && protection.isProtected(p.row, p.col, sn))
+}
+// A fill writes only the destination — the strip(s) of `total` outside `src`.
+// Checking the whole extent would wrongly block a fill that merely *starts*
+// from a protected cell (reading a protected source is fine; only writes are
+// guarded). A fill extends in one direction, so at most one strip is non-empty.
+function _fillDestBlocked(src, total, sn = sheet.getCurrentSheet()) {
+  const strips = []
+  if (total.r1 > src.r1) strips.push({ r0: src.r1 + 1, r1: total.r1, c0: total.c0, c1: total.c1 })
+  if (total.r0 < src.r0) strips.push({ r0: total.r0, r1: src.r0 - 1, c0: total.c0, c1: total.c1 })
+  if (total.c1 > src.c1) strips.push({ r0: total.r0, r1: total.r1, c0: src.c1 + 1, c1: total.c1 })
+  if (total.c0 < src.c0) strips.push({ r0: total.r0, r1: total.r1, c0: total.c0, c1: src.c0 - 1 })
+  if (!strips.some(s => protection.isAnyProtected(s, sn))) return false
+  _flashProtected(sn); return true
+}
+
+// ── Protection UI actions ─────────────────────────────────────────────────────
+function protectSelection() {
+  contextMenu.open = false
+  const sel = grid?.getSelection?.()
+  if (!sel) return
+  protection.addRange(sel, '', sheet.getCurrentSheet())
+  history.push()
+  isDirty.value = true
+  grid?.render?.()
+}
+function unprotectSelection() {
+  contextMenu.open = false
+  const sel = grid?.getSelection?.()
+  if (!sel) return
+  const sn = sheet.getCurrentSheet()
+  // Drop every protected range that overlaps the selection.
+  for (const r of [...protection.getRanges(sn)]) {
+    if (sel.r0 <= r.r1 && sel.r1 >= r.r0 && sel.c0 <= r.c1 && sel.c1 >= r.c0) {
+      protection.removeRange(r.id, sn)
+    }
+  }
+  history.push()
+  isDirty.value = true
+  grid?.render?.()
+}
+function toggleSheetProtection(name) {
+  tabMenu.open = false
+  protection.setSheetLocked(!protection.isSheetLocked(name), name)
+  history.push()
+  isDirty.value = true
+  grid?.render?.()
+}
+// Menu-label reads. These are plain functions (not computed) so the template
+// re-evaluates them against the live selection each time the menu re-renders —
+// a computed would cache a stale answer when neither dep happened to change.
+// selectionHasProtectedRange looks only at ranges: the whole-sheet lock is a
+// separate affordance in the tab menu, so "Remove protection" here never lies
+// about a lock it can't clear.
+function selectionHasProtectedRange() {
+  const sel = grid?.getSelection?.()
+  if (!sel) return false
+  const sn = sheet.getCurrentSheet()
+  return protection.getRanges(sn).some(r =>
+    sel.r0 <= r.r1 && sel.r1 >= r.r0 && sel.c0 <= r.c1 && sel.c1 >= r.c0)
+}
+function tabMenuSheetLocked() {
+  return !!tabMenu.name && protection.isSheetLocked(tabMenu.name)
+}
+
 // Diff two id→value maps, returning the ids whose value changed.  Used to
 // trim noisy before/after pairs down to the cells that actually moved.
 function _diffRefs(before, after) {
@@ -3548,6 +3729,13 @@ function _commitFormulaBar() {
   const homeCell    = editingHomeCell.value
   const targetSheet = homeSheet || sheet.getCurrentSheet()
   const targetId    = homeCell  || activeCell.value
+  // Protected target — discard the edit and restore the bar to the cell value.
+  if (_cellBlocked(targetId, targetSheet)) {
+    editingHomeSheet.value = null
+    editingHomeCell.value  = null
+    formulaValue.value = sheet.getCell(targetId, targetSheet)
+    return
+  }
   const before      = { [targetId]: sheet.getCell(targetId, targetSheet) }
   if (homeSheet && homeSheet !== sheet.getCurrentSheet()) {
     switchSheet(homeSheet, { preserveEdit: true })
@@ -3584,6 +3772,7 @@ function fillDown() {
   const { r0, c0, r1, c1 } = grid.getSelection()
   if (r1 <= r0) return
   const sn = sheet.getCurrentSheet()
+  if (_rectBlocked({ r0: r0 + 1, c0, r1, c1 }, sn)) return
   const before = {}
   for (let c = c0; c <= c1; c++) {
     for (let r = r0 + 1; r <= r1; r++) {
@@ -3607,6 +3796,7 @@ function fillRight() {
   const { r0, c0, r1, c1 } = grid.getSelection()
   if (c1 <= c0) return
   const sn = sheet.getCurrentSheet()
+  if (_rectBlocked({ r0, c0: c0 + 1, r1, c1 }, sn)) return
   const before = {}
   for (let r = r0; r <= r1; r++) {
     for (let c = c0 + 1; c <= c1; c++) {
@@ -3665,6 +3855,8 @@ function onDocCut(e) {
   e.preventDefault()
   const src    = grid.getSelection()
   const sn     = sheet.getCurrentSheet()
+  // Cut moves content out of the source — block it when the source is protected.
+  if (_rectBlocked(src, sn)) return
   const before = _captureRange(src, sn)
   clipboard.cut(src)
   clipboardHas.value = true
@@ -3729,12 +3921,20 @@ async function onDocPaste(e) {
   if (clipboard.hasData()) {
     // Internal cut/copy — empty historyPush callback so we control the
     // history entry from out here. clipboard still does its mutations.
-    clipboard.paste(activeCell.value, () => {}, 'all', destSel)
+    // A protected destination returns { blocked } and writes nothing.
+    if (clipboard.paste(activeCell.value, () => {}, 'all', destSel)?.blocked) {
+      // Leave marching ants + cut buffer intact — nothing moved, the cut/copy
+      // is still pending so the user can retry on an unprotected target.
+      _flashProtected(sn); return
+    }
     pasted = true
   } else if (html && clipboard.pasteFromHTML(html, activeCell.value, () => {}, destSel)) {
     pasted = true
   } else if (text) {
-    clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)
+    // Protection: a protected destination returns { blocked } and writes nothing.
+    if (clipboard.pasteFromText(text, activeCell.value, () => {}, destSel)?.blocked) {
+      _flashProtected(sn); return
+    }
     pasted = true
   }
   clipboardHas.value = clipboard.hasData()
@@ -3778,7 +3978,9 @@ function doPasteSpecial(kind) {
   const beforeFmt  = Object.assign({}, ...rects.map(r => _captureFormatsRange(r, sn)))
   const beforeVal  = Object.assign({}, ...rects.map(r => _captureValidationRange(r, sn)))
   const cfBefore   = condFormat?.getRules?.(sn)?.length ?? 0
-  clipboard.paste(activeCell.value, () => {}, kind, destSel)
+  if (clipboard.paste(activeCell.value, () => {}, kind, destSel)?.blocked) {
+    _flashProtected(sn); return   // keep the pending cut/copy + its marching ants
+  }
   for (const r of rects) _refreshDisplayForRange(r, sn)
   clipboardHas.value = clipboard.hasData()
   grid?.setMarchingAnts(null)
@@ -4162,6 +4364,7 @@ function openDropdown(id, rule, pos = {}) {
 function pickDropdownOption(opt) {
   const id     = dropdownPanel.id
   const sn     = sheet.getCurrentSheet()
+  if (_cellBlocked(id, sn)) { dropdownPanel.open = false; return }
   const before = { [id]: sheet.getCell(id, sn) }
   sheet.setCell(id, opt)
   dropdownPanel.open = false
@@ -4560,7 +4763,12 @@ function clearFilterCol() {
 }
 
 function doSort(colIdx, dir) {
-  sortFilter.sort(colIdx, dir, sheet.getCurrentSheet())
+  const sn = sheet.getCurrentSheet()
+  // Sorting permutes values across the filter range — refuse if it overlaps
+  // protection, matching Google Sheets (a protected range blocks the sort).
+  const range = sortFilter.getRange(sn)
+  if (range && _rectBlocked(range, sn)) return
+  sortFilter.sort(colIdx, dir, sn)
   filterPanel.open = false
   _repopulateGrid()
   _applyHiddenRows()
@@ -4653,6 +4861,7 @@ function doInsertRow(below = false, count = 1) {
     formats.insertRow(atRow, sn)
     comments.insertRow(atRow, sn)
     validation.insertRow(atRow, sn)
+    protection.insertRow(atRow, sn)
     condFormat.insertRow(atRow, sn)
     sortFilter.insertRow(atRow, sn)
     grid.shiftRowHeights(atRow, 1)
@@ -4744,6 +4953,7 @@ function confirmHyperlink() {
   if (!url) { showHyperlinkDialog.value = false; return }
   const id = activeCell.value
   const sh = sheet.getCurrentSheet()
+  if (_cellBlocked(id, sh)) { showHyperlinkDialog.value = false; return }
   if (hyperlinkText.value !== sheet.getCell(id)) sheet.setCell(id, hyperlinkText.value)
   formats.applyToRange([id], { hyperlink: url }, sh)
   history.push()   // post-mutate
@@ -4795,6 +5005,7 @@ function doDeleteRow() {
     formats.deleteRow(start, sn)
     comments.deleteRow(start, sn)
     validation.deleteRow(start, sn)
+    protection.deleteRow(start, sn)
     condFormat.deleteRow(start, sn)
     sortFilter.deleteRow(start, sn)
     grid.shiftRowHeights(start + 1, -1)
@@ -4814,6 +5025,7 @@ function doInsertCol(right = false, count = 1) {
     formats.insertCol(atCol, sn)
     comments.insertCol(atCol, sn)
     validation.insertCol(atCol, sn)
+    protection.insertCol(atCol, sn)
     condFormat.insertCol(atCol, sn)
     sortFilter.insertCol(atCol, sn)
     grid.shiftColWidths(atCol, 1)
@@ -4838,6 +5050,7 @@ function doDeleteCol() {
     formats.deleteCol(start, sn)
     comments.deleteCol(start, sn)
     validation.deleteCol(start, sn)
+    protection.deleteCol(start, sn)
     condFormat.deleteCol(start, sn)
     sortFilter.deleteCol(start, sn)
     grid.shiftColWidths(start + 1, -1)

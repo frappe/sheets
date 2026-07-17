@@ -20,6 +20,7 @@
   "index.html": {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "index.B75HMayz.js",
 =======
     "file": "index.CkXYmsYo.js",
@@ -27,6 +28,9 @@
 =======
     "file": "index.29ZVaMAO.js",
 >>>>>>> feat/parity-xlsx
+=======
+    "file": "index.BZfJ3lxT.js",
+>>>>>>> feat/parity-phase1
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -42,6 +46,7 @@
     "css": [
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
       "index.Dv46zLRA.css"
 =======
       "index.DbOIACPx.css"
@@ -49,6 +54,9 @@
 =======
       "index.DBA9GQ0p.css"
 >>>>>>> feat/parity-xlsx
+=======
+      "index.Cy_Sx8kc.css"
+>>>>>>> feat/parity-phase1
     ],
     "assets": [
       "Inter.var.C9xDBOS3.woff2",
@@ -64,6 +72,7 @@
   "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue": {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "FontColor.DGMebAC9.js",
 =======
     "file": "FontColor.DD-fNlF4.js",
@@ -71,6 +80,9 @@
 =======
     "file": "FontColor.GVRvQsYY.js",
 >>>>>>> feat/parity-xlsx
+=======
+    "file": "FontColor.BVdAzy7X.js",
+>>>>>>> feat/parity-phase1
     "name": "FontColor",
     "src": "node_modules/frappe-ui/src/components/TextEditor/components/FontColor.vue",
     "isDynamicEntry": true,
@@ -82,6 +94,7 @@
   "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue": {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "InsertIframe.Xz9C9_-P.js",
 =======
     "file": "InsertIframe.Du2LKe9N.js",
@@ -89,6 +102,9 @@
 =======
     "file": "InsertIframe.BgTJDbgK.js",
 >>>>>>> feat/parity-xlsx
+=======
+    "file": "InsertIframe.-OVKvqTg.js",
+>>>>>>> feat/parity-phase1
     "name": "InsertIframe",
     "src": "node_modules/frappe-ui/src/components/TextEditor/extensions/iframe/InsertIframe.vue",
     "isDynamicEntry": true,
@@ -124,6 +140,7 @@
   "src/pages/SheetEditor/ChartView.vue": {
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     "file": "ChartView.CWz2oqfg.js",
 =======
     "file": "ChartView.oKFPrlpb.js",
@@ -131,6 +148,9 @@
 =======
     "file": "ChartView.BcEoJxqU.js",
 >>>>>>> feat/parity-xlsx
+=======
+    "file": "ChartView.DY-iyAgy.js",
+>>>>>>> feat/parity-phase1
     "name": "ChartView",
     "src": "src/pages/SheetEditor/ChartView.vue",
     "isDynamicEntry": true,

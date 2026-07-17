@@ -6,7 +6,7 @@ import { packSheet, packSheetChunked, unpackSheet, boundsOf } from '../../utils/
 // `merge` and the view-state getters/setters are optional — they were missing
 // from earlier versions and their absence caused merged cells / column widths /
 // freeze panes / hidden cols/rows to silently disappear after every save.
-export function usePersistence({ sheet, formats, merge, comments, validation, condFormat, sortFilter, pivot, charts, namedRanges, getViewState, applyViewState, currentTitle, emit }) {
+export function usePersistence({ sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot, charts, namedRanges, getViewState, applyViewState, currentTitle, emit }) {
   const isSaving  = ref(false)
   const saveError = ref('')
   // Write permission for the currently-loaded sheet, from get_sheet's `can_write`.
@@ -33,6 +33,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
       if (saved.merge      && merge?.restore)      merge.restore(saved.merge)
       if (saved.comments   && comments?.restore)   comments.restore(saved.comments)
       if (saved.validation && validation?.restore) validation.restore(saved.validation)
+      if (saved.protection && protection?.restore) protection.restore(saved.protection)
       if (saved.condFormat && condFormat?.restore) condFormat.restore(saved.condFormat)
       if (saved.sortFilter && sortFilter?.restore) sortFilter.restore(saved.sortFilter)
       if (saved.view       && applyViewState)      applyViewState(saved.view)
@@ -117,6 +118,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, co
         merge:      merge?.snapshot?.()      ?? null,
         comments:   comments?.snapshot?.()   ?? null,
         validation: validation?.snapshot?.() ?? null,
+        protection: protection?.snapshot?.() ?? null,
         condFormat: condFormat?.snapshot?.() ?? null,
         sortFilter: sortFilter?.snapshot?.() ?? null,
         pivot:      pivot?.snapshot?.()      ?? null,
