@@ -261,11 +261,17 @@ export function useExportImport({
         await _ingestWorksheet(ws, sheet, formats, merge, name)
       }
     } finally {
+      // Always resync the tab bar so engine + UI agree even after a partial
+      // import; only dirty the doc when a sheet was actually added (an empty
+      // workbook, or a throw before the first add, must not mark it dirty).
       syncNames?.()
-      if (firstAdded) switchSheet?.(firstAdded)
-      else            repopulateGrid()
-      syncFlags()
-      isDirty.value = true
+      if (firstAdded) {
+        switchSheet?.(firstAdded)
+        syncFlags()
+        isDirty.value = true
+      } else {
+        repopulateGrid()
+      }
     }
   }
 
