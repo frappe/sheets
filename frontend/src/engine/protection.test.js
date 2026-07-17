@@ -153,21 +153,21 @@ describe('ProtectionEngine — sheet lifecycle & snapshot', () => {
     expect(p.getRanges('A')).toEqual([])
   })
 
-  it('restore advances the id counter so new ranges never collide', () => {
-    // Simulate a reload: a fresh engine restores a saved range (id already 1),
-    // then the user adds a new range. The new id must differ from the restored
-    // one, or removeRange would drop both.
-    const src = createProtectionEngine()
-    const savedId = src.addRange(rect(0, 0, 0, 0))
-    const snap = src.snapshot()
-
-    const fresh = createProtectionEngine()
-    fresh.restore(snap)
-    const newId = fresh.addRange(rect(5, 5, 5, 5))
-    expect(newId).not.toBe(savedId)
-    fresh.removeRange(newId)
-    expect(fresh.isProtected(0, 0)).toBe(true)   // restored range survives
-    expect(fresh.isProtected(5, 5)).toBe(false)
+  it('restore advances the id counter past restored ids (no post-reload collision)', () => {
+    // A saved doc's range ids can exceed a freshly re-initialised module
+    // counter (the reload case). Restore a snapshot whose id is far above any
+    // the counter has reached, then add a range: its id must clear the restored
+    // one, or removeRange would later drop both. HIGH is picked well above the
+    // handful of addRange calls in this file so the assertion is real, not
+    // trivially satisfied by an already-advanced counter.
+    const HIGH = 1_000_000
+    const p2 = createProtectionEngine()
+    p2.restore({ Sheet1: { locked: false, ranges: [{ id: HIGH, r0: 0, c0: 0, r1: 0, c1: 0 }] } })
+    const newId = p2.addRange(rect(5, 5, 5, 5))
+    expect(newId).toBeGreaterThan(HIGH)          // fails if restore didn't advance the counter
+    p2.removeRange(newId)
+    expect(p2.isProtected(0, 0)).toBe(true)      // restored range survives its own removal
+    expect(p2.isProtected(5, 5)).toBe(false)
   })
 
   it('snapshot/restore round-trips and is independent of later edits', () => {
