@@ -1039,10 +1039,9 @@
         <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
                 @mousedown.stop @click="removeSlicer(sl)" />
       </div>
-      <div class="sn-slicer-actions" @mousedown.stop>
-        <button type="button" class="sn-slicer-link" @click="selectAllSlicer(sl)">Select all</button>
-        <span class="sn-slicer-link-sep">·</span>
-        <button type="button" class="sn-slicer-link" :disabled="!sl.filtered" @click="clearSlicerValues(sl)">Clear</button>
+      <div class="sn-fp-vlinks sn-slicer-actions" @mousedown.stop>
+        <Button variant="ghost" size="sm" label="Select all" @click="selectAllSlicer(sl)" />
+        <Button variant="ghost" size="sm" label="Clear" :disabled="!sl.filtered" @click="clearSlicerValues(sl)" />
       </div>
       <div class="sn-slicer-values">
         <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
@@ -6086,11 +6085,7 @@ function toggleShowFormulas() {
 .sn-slicer-colsel { flex:1 1 auto; min-width:0; }
 .sn-slicer-colsel :deep(button) { width:100%; justify-content:space-between; font-weight:600; }
 .sn-slicer-colsel :deep(button > span) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.sn-slicer-actions { display:flex; align-items:center; gap:6px; padding:0 2px; }
-.sn-slicer-link   { font-size:11px; font-weight:500; color:var(--ink-blue-500, #2563eb); background:none; border:0; padding:0; cursor:pointer; }
-.sn-slicer-link:hover:not(:disabled) { text-decoration:underline; }
-.sn-slicer-link:disabled { color:var(--ink-gray-4); cursor:default; }
-.sn-slicer-link-sep { color:var(--ink-gray-4); font-size:11px; }
+.sn-slicer-actions { margin:-2px 0; }
 .sn-slicer-values { max-height:220px; overflow-y:auto; border:1px solid var(--outline-gray-2); border-radius:8px; padding:4px 0; background:var(--surface-white); }
 .sn-comment-header { display:flex; align-items:center; justify-content:space-between; }
 .sn-comment-title  { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--ink-gray-7); text-transform:uppercase; }
@@ -6178,4 +6173,8 @@ function toggleShowFormulas() {
   max-height: min(60vh, 480px);
   overflow-y: auto;
 }
+/* Dropdown popovers are teleported to <body> with no z-index of their own, so
+   they'd stack below the floating slicer (z-index:8400) / context menu (9000).
+   A menu is always transient and topmost — keep it above every floating panel. */
+.dropdown-content { z-index: 9500; }
 </style>
