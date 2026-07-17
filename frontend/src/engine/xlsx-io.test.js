@@ -31,6 +31,13 @@ describe('zToNumFmt — Excel z → our format', () => {
   it('unknown code preserved as custom', () => {
     expect(zToNumFmt('#,##0.000;[Red]-#,##0.000')).toBe('custom:#,##0.000;[Red]-#,##0.000')
   })
+  it('a real percent still maps to percentage', () => {
+    expect(zToNumFmt('0.00%')).toBe('percentage')
+  })
+  it('a quoted or escaped percent is a literal, not a percentage', () => {
+    expect(zToNumFmt('0 "50%"')).toBe('custom:0 "50%"')
+    expect(zToNumFmt('#,##0\\%')).toBe('custom:#,##0\\%')
+  })
 })
 
 describe('format round-trips (our → z → our) are lossless', () => {

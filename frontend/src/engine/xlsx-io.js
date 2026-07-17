@@ -31,6 +31,18 @@ for (const [code, c] of Object.entries(CURRENCIES)) if (!(c.symbol in SYMBOL_TO_
 function _dec(n) { return n > 0 ? '.' + '0'.repeat(n) : '' }
 // Count of fraction placeholders after the decimal point in a z-code.
 function _decCount(z) { const m = z.match(/\.(0+)/); return m ? m[1].length : 0 }
+// True only for a '%' that actually scales — i.e. outside quotes and not
+// backslash-escaped. A literal `"%"` or `\%` is just a character.
+function _hasActivePercent(z) {
+  let inQuote = false
+  for (let i = 0; i < z.length; i++) {
+    const c = z[i]
+    if (c === '\\') { i++; continue }
+    if (c === '"') { inQuote = !inQuote; continue }
+    if (c === '%' && !inQuote) return true
+  }
+  return false
+}
 function _invert(o) { return Object.fromEntries(Object.entries(o).map(([k, v]) => [v, k])) }
 
 // Our format string → Excel z-code (or null for General / no format).
@@ -68,7 +80,7 @@ export function zToNumFmt(z) {
   if (sp > 0 && Z_DATE[t.slice(0, sp)] && Z_TIME[t.slice(sp + 1)]) {
     return `datetime:${Z_DATE[t.slice(0, sp)]}_${Z_TIME[t.slice(sp + 1)]}`
   }
-  if (t.includes('%')) return _withDec('percentage', _decCount(t))
+  if (_hasActivePercent(t)) return _withDec('percentage', _decCount(t))
   const cur = t.match(/^"([^"]+)"#,##0/)   // capture the WHOLE symbol (C$, A$, …)
   if (cur && SYMBOL_TO_CODE[cur[1]]) return `currency:${SYMBOL_TO_CODE[cur[1]]}:${_decCount(t)}`
   if (/^#,##0(\.0+)?$/.test(t)) return _withDec('number', _decCount(t))
