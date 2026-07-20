@@ -1,6 +1,7 @@
 import { createGeometry } from './geometry.js'
 import { createRenderer } from './renderer.js'
 import { createOverlay }  from './overlay.js'
+import { createScrollbars } from './scrollbars.js'
 import { TOTAL_ROWS, TOTAL_COLS, DEFAULT_TOTAL_ROWS, DEFAULT_TOTAL_COLS, DEFAULT_ROW_H, ROW_HEADER_W, COL_HEADER_H, setTotalRows, setTotalCols } from './constants.js'
 import { cellId, colLabel, parseCellId } from '../utils/cells.js'
 import { AC_FUNS, AC_FUN_KEYS, parseAcToken, parseSignatureContext, describeSignature } from '../utils/formula-ac.js'
@@ -76,6 +77,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   const geo      = createGeometry(colW, rowH, scroll, freeze, hiddenRows, hiddenCols, () => _zoom, filterHiddenRows)
   const renderer = createRenderer(ctx, geo)
   const overlay  = createOverlay(canvas.parentElement)
+  const scrollbars = createScrollbars(canvas.parentElement, { getModel: () => _scrollModel(), scrollTo })
   _acSetup()
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -115,6 +117,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   function render() {
     renderer.render({ cssW, cssH, getValue, sel, selEnd, selMode, editing, getFormat, freeze, getMergeInfo, isSlave, getComment, getValidation, getCondFormat, getSparkline, getRightInset, getDiffFor: _diffCells ? _getDiffFor : null, marchAnts, marchPhase, pickerRect, zoom: _zoom })
+    scrollbars.layout()
     for (const cb of _renderListeners) cb()
   }
 
@@ -192,13 +195,48 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   // Max scroll so the last col/row sits flush with the viewport's right/bottom.
   // Beyond this we'd just be showing empty canvas past the sheet — Google
   // Sheets clamps to here, so do we.
-  function _sheetTotalW() { let w = 0; for (let c = 0; c < TOTAL_COLS; c++) w += geo.cw(c); return w }
-  function _sheetTotalH() { let h = 0; for (let r = 0; r < TOTAL_ROWS; r++) h += geo.rh(r); return h }
-  function _maxScrollX()  { return Math.max(0, _sheetTotalW() + ROW_HEADER_W - cssW) }
-  function _maxScrollY()  { return Math.max(0, _sheetTotalH() + COL_HEADER_H - cssH) }
+  // Full sheet extent incl. the header gutter, in logical px. Summing every
+  // column/row is O(cols+rows) — up to tens of thousands of iterations — so we
+  // cache it and recompute only in `_applyCanvasSize`, the single choke point
+  // every structural change (resize, col/row size, expand, freeze, hide) routes
+  // through. Scroll clamping and the scrollbar model then read it for free.
+  let _contentW = ROW_HEADER_W, _contentH = COL_HEADER_H
+  function _recomputeExtent() {
+    let w = 0; for (let c = 0; c < TOTAL_COLS; c++) w += geo.cw(c)
+    let h = 0; for (let r = 0; r < TOTAL_ROWS; r++) h += geo.rh(r)
+    _contentW = w + ROW_HEADER_W
+    _contentH = h + COL_HEADER_H
+  }
+  function _maxScrollX()  { return Math.max(0, _contentW - cssW) }
+  function _maxScrollY()  { return Math.max(0, _contentH - cssH) }
   function _clampScroll() {
     scroll.x = Math.max(0, Math.min(scroll.x, _maxScrollX()))
     scroll.y = Math.max(0, Math.min(scroll.y, _maxScrollY()))
+  }
+
+  // Single entry point for setting the scroll offset (logical units). Used by
+  // the wheel handler and the overlay scrollbars so both keep the in-cell
+  // editor pinned to its cell and repaint. Values are clamped to the sheet.
+  function scrollTo(x, y) {
+    scroll.x = x
+    scroll.y = y
+    _clampScroll()
+    if (editing) {
+      const fmt = getFormat ? getFormat(cellId(sel.r, sel.c)) : {}
+      overlay.position(geo.colX(sel.c) * _zoom, geo.rowY(sel.r) * _zoom, geo.cw(sel.c) * _zoom, geo.rh(sel.r) * _zoom, fmt, _zoom)
+    }
+    render()
+  }
+
+  // Scroll model consumed by the overlay scrollbars — everything the thumbs
+  // need to size and position themselves, in logical units (the scrollbars work
+  // in ratios, so zoom cancels out). `content` is the full sheet extent incl.
+  // the header gutter; `view` is the visible logical span.
+  function _scrollModel() {
+    return {
+      x: { pos: scroll.x, max: _maxScrollX(), view: cssW, content: _contentW },
+      y: { pos: scroll.y, max: _maxScrollY(), view: cssH, content: _contentH },
+    }
   }
 
   function ensureVisible(r, c) {
@@ -1328,14 +1366,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     e.preventDefault()
     // Wheel deltas are physical pixels; scroll is logical. Divide so a single
     // notch advances the same logical distance regardless of zoom.
-    scroll.x += e.deltaX / _zoom
-    scroll.y += e.deltaY / _zoom
-    _clampScroll()
-    if (editing) {
-      const fmt = getFormat ? getFormat(cellId(sel.r, sel.c)) : {}
-      overlay.position(geo.colX(sel.c) * _zoom, geo.rowY(sel.r) * _zoom, geo.cw(sel.c) * _zoom, geo.rh(sel.r) * _zoom, fmt, _zoom)
-    }
-    render()
+    scrollTo(scroll.x + e.deltaX / _zoom, scroll.y + e.deltaY / _zoom)
   }, { passive: false })
 
   canvas.setAttribute('tabindex', '0')
@@ -1463,8 +1494,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     // smaller area while the on-screen pixels stay constant. The canvas's
     // *physical* size is tied to the viewport (×dpr ×zoom), so high-DPI plus
     // zoom both contribute to backing-store resolution.
-    const sheetW = _sheetTotalW() + ROW_HEADER_W
-    const sheetH = _sheetTotalH() + COL_HEADER_H
+    _recomputeExtent()
+    const sheetW = _contentW
+    const sheetH = _contentH
     const viewLogicalW = _viewportW / _zoom
     const viewLogicalH = _viewportH / _zoom
     cssW = Math.min(viewLogicalW, sheetW)
@@ -1517,6 +1549,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   function destroy() {
     overlay.remove()
+    scrollbars.destroy()
     _acEl?.remove()
     if (_raf)       { cancelAnimationFrame(_raf);       _raf = null }
     if (_marchRAF)  { cancelAnimationFrame(_marchRAF);  _marchRAF = null }

@@ -2733,6 +2733,10 @@ const filterHighlightStyle = computed(() => {
   const headerX = ROW_HEADER_W * zoom
   const right   = br.x + br.width
   const bottom  = br.y + br.height
+  // When the range runs past the viewport the far borders sit off-screen and
+  // the grid-wrap's overflow:hidden clips them (Google-Sheets-style — no frame
+  // at the edge); the opaque scrollbar (z-index 16) covers any border that
+  // lands in its gutter while it's visible. So no viewport clamp here.
   if (bottom <= headerY || right <= headerX) return null
   const top  = Math.max(tl.y, headerY)
   const left = Math.max(tl.x, headerX)
@@ -6177,4 +6181,32 @@ function toggleShowFormulas() {
    they'd stack below the floating slicer (z-index:8400) / context menu (9000).
    A menu is always transient and topmost — keep it above every floating panel. */
 .dropdown-content { z-index: 9500; }
+
+/* Overlay scrollbars for the canvas grid. The elements are created imperatively
+   in canvas/scrollbars.js (appended to .sn-grid-wrap), so they carry no scoped
+   data-attr — these rules must live in the UNSCOPED block to reach them. */
+/* z-index sits above the filter (14) / pivot (15) range outlines so the opaque
+   track paints over any outline border that reaches the scrollbar gutter, but
+   below the notes drawer (30) and popovers. */
+.sn-sb          { position:absolute; z-index:16; background:var(--surface-menu-bar, #f8f8f8);
+                  border:0 solid var(--outline-gray-2, #e2e2e2);
+                  opacity:1; transition:opacity .2s ease; }
+.sn-sb-v        { top:0; right:0; width:12px; border-left-width:1px; }
+.sn-sb-h        { left:0; bottom:0; height:12px; border-top-width:1px; }
+.sn-sb-corner   { position:absolute; z-index:16; right:0; bottom:0; width:12px; height:12px;
+                  background:var(--surface-menu-bar, #f8f8f8);
+                  border-left:1px solid var(--outline-gray-2, #e2e2e2);
+                  border-top:1px solid var(--outline-gray-2, #e2e2e2);
+                  opacity:1; transition:opacity .2s ease; }
+/* Auto-hidden state — faded out and click-through so cells under the gutter
+   stay reachable. JS (canvas/scrollbars.js) toggles this on inactivity. */
+.sn-sb--hidden  { opacity:0; pointer-events:none; }
+.sn-sb-thumb    { position:absolute; border-radius:6px; background:var(--ink-gray-4, #b8b8b8);
+                  transition:background .12s ease; cursor:grab; touch-action:none; }
+.sn-sb-dragging .sn-sb-thumb { cursor:grabbing; }
+.sn-sb-v .sn-sb-thumb { top:0; left:2px; right:2px; }
+.sn-sb-h .sn-sb-thumb { left:0; top:2px; bottom:2px; }
+.sn-sb-thumb:hover           { background:var(--ink-gray-5, #7c7c7c); }
+.sn-sb-dragging .sn-sb-thumb { background:var(--ink-gray-6, #6b6b6b); }
+.sn-sb-dragging              { cursor:grabbing; user-select:none; }
 </style>
