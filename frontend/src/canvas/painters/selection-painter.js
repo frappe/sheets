@@ -26,7 +26,9 @@ export function createSelectionPainter(ctx, { cw, rh, colX, rowY }) {
     ctx.rect(clipX, clipY, Math.max(0, cssW - clipX), Math.max(0, cssH - clipY))
     ctx.clip()
     ctx.strokeStyle = COLORS.selBorder
-    ctx.lineWidth = 2
+    // 1.5px — a full 2px black frame read as chunky against the gridlines
+    // (Google Sheets' active-cell outline is a comparably thin line).
+    ctx.lineWidth = 1.5
     ctx.strokeRect(colX(sel.c) + 1, rowY(sel.r) + 1, mergedW - 2, mergedH - 2)
     ctx.lineWidth = 1
     // Fill handle anchors at the bottom-right of the *visible* selection.
@@ -49,11 +51,11 @@ export function createSelectionPainter(ctx, { cw, rh, colX, rowY }) {
     // White ring so the dot stands out against the cell border
     ctx.fillStyle = COLORS.white
     ctx.beginPath()
-    ctx.arc(hx, hy, 5, 0, Math.PI * 2)
+    ctx.arc(hx, hy, 4, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = COLORS.selHandle
     ctx.beginPath()
-    ctx.arc(hx, hy, 4, 0, Math.PI * 2)
+    ctx.arc(hx, hy, 3, 0, Math.PI * 2)
     ctx.fill()
     ctx.restore()
   }

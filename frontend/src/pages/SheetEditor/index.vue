@@ -5794,7 +5794,9 @@ function toggleShowFormulas() {
    stays off so the chevron buttons and canvas underneath keep receiving clicks. */
 .sn-filter-range {
   position: absolute; z-index: 14; pointer-events: none;
-  border: 1.5px solid var(--ink-gray-8);
+  /* Thin green outline, Google-Sheets-style — a 1.5px near-black frame read
+     as far too heavy against the gridlines. */
+  border: 1px solid var(--ink-green-3, #15803d);
   border-radius: 2px;
 }
 
