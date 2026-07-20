@@ -207,6 +207,10 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     _contentW = w + ROW_HEADER_W
     _contentH = h + COL_HEADER_H
   }
+  // Prime the cache at construction so _clampScroll / scrollTo are correct even
+  // before the first resize() → _applyCanvasSize. Otherwise the header-only
+  // seed values above would clamp any pre-resize scroll to ~0.
+  _recomputeExtent()
   function _maxScrollX()  { return Math.max(0, _contentW - cssW) }
   function _maxScrollY()  { return Math.max(0, _contentH - cssH) }
   function _clampScroll() {

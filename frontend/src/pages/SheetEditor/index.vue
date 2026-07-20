@@ -6193,9 +6193,12 @@ function toggleShowFormulas() {
 .sn-sb          { position:absolute; z-index:16; background:var(--surface-menu-bar, #f8f8f8);
                   border:0 solid var(--outline-gray-2, #e2e2e2);
                   opacity:1; transition:opacity .2s ease; }
-.sn-sb-v        { top:0; right:0; width:12px; border-left-width:1px; }
-.sn-sb-h        { left:0; bottom:0; height:12px; border-top-width:1px; }
-.sn-sb-corner   { position:absolute; z-index:16; right:0; bottom:0; width:12px; height:12px;
+/* --sn-sb-thick is published by canvas/scrollbars.js from SCROLLBAR_THICK, the
+   single source of truth; the 12px fallback only covers the pre-mount frame. */
+.sn-sb-v        { top:0; right:0; width:var(--sn-sb-thick, 12px); border-left-width:1px; }
+.sn-sb-h        { left:0; bottom:0; height:var(--sn-sb-thick, 12px); border-top-width:1px; }
+.sn-sb-corner   { position:absolute; z-index:16; right:0; bottom:0;
+                  width:var(--sn-sb-thick, 12px); height:var(--sn-sb-thick, 12px);
                   background:var(--surface-menu-bar, #f8f8f8);
                   border-left:1px solid var(--outline-gray-2, #e2e2e2);
                   border-top:1px solid var(--outline-gray-2, #e2e2e2);

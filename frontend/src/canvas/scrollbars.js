@@ -37,6 +37,9 @@ export function createScrollbars(host, { getModel, scrollTo }) {
   host.appendChild(vTrack)
   host.appendChild(hTrack)
   host.appendChild(corner)
+  // Publish the track thickness so the CSS (track width/height, corner size)
+  // reads a single source of truth instead of duplicating the pixel value.
+  host.style.setProperty('--sn-sb-thick', THICK + 'px')
 
   // Per-axis geometry cached from the last layout(), read by the drag handlers.
   const geom = { x: null, y: null }
@@ -171,6 +174,7 @@ export function createScrollbars(host, { getModel, scrollTo }) {
   function destroy() {
     if (_hideTimer) clearTimeout(_hideTimer)
     host.removeEventListener('pointermove', onHostMove)
+    host.style.removeProperty('--sn-sb-thick')
     vTrack.remove()
     hTrack.remove()
     corner.remove()
