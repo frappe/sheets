@@ -240,6 +240,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     return {
       x: { pos: scroll.x, max: _maxScrollX(), view: cssW, content: _contentW },
       y: { pos: scroll.y, max: _maxScrollY(), view: cssH, content: _contentH },
+      // Physical viewport (the grid-wrap's content box). Lets the scrollbars
+      // size their tracks arithmetically instead of reading clientWidth/Height
+      // each render — avoiding a forced reflow in the scroll/selection hot path.
+      viewportW: _viewportW,
+      viewportH: _viewportH,
     }
   }
 

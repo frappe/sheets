@@ -97,14 +97,21 @@ export function createScrollbars(host, { getModel, scrollTo }) {
     hTrack.style.right   = showV ? THICK + 'px' : '0'
     corner.style.display = showV && showH ? 'block' : 'none'
 
+    // Track length = the viewport minus the perpendicular bar's gutter. Derived
+    // from the model's physical viewport rather than read from the DOM, so this
+    // hot path (every scroll / selection render) writes styles without ever
+    // reading clientWidth/Height — no forced synchronous reflow.
+    const vTrackPx = m.viewportH - (showH ? THICK : 0)
+    const hTrackPx = m.viewportW - (showV ? THICK : 0)
+
     if (showV) {
-      const g = geom.y = measure(vTrack.clientHeight, m.y)
+      const g = geom.y = measure(vTrackPx, m.y)
       vThumb.style.height    = g.thumbPx + 'px'
       vThumb.style.transform = `translateY(${g.offset}px)`
       vTrack.setAttribute('aria-valuenow', String(Math.round(g.posFrac * 100)))
     }
     if (showH) {
-      const g = geom.x = measure(hTrack.clientWidth, m.x)
+      const g = geom.x = measure(hTrackPx, m.x)
       hThumb.style.width     = g.thumbPx + 'px'
       hThumb.style.transform = `translateX(${g.offset}px)`
       hTrack.setAttribute('aria-valuenow', String(Math.round(g.posFrac * 100)))
