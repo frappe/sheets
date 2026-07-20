@@ -2,6 +2,9 @@ export const COL_HEADER_H  = 24
 export const ROW_HEADER_W  = 50
 export const DEFAULT_COL_W = 100
 export const DEFAULT_ROW_H = 24
+// Thickness of the overlay scrollbars (see canvas/scrollbars.js). Shared so DOM
+// overlays (filter/pivot outlines) can keep clear of the scrollbar gutter.
+export const SCROLLBAR_THICK = 12
 // Default grid size a fresh/empty sub-sheet shows (Google-Sheets-like). The
 // live counts below grow past these when a sheet's data needs it, and reset
 // back to them per sub-sheet on switch so a 100k-row source doesn't leave every

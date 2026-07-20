@@ -157,6 +157,9 @@ export function usePivotIntegration({
     const headerX = ROW_HEADER_W * zoom
     const right   = br.x + br.width
     const bottom  = br.y + br.height
+    // No viewport clamp — the grid-wrap clips borders that run off-screen and
+    // the opaque scrollbar covers any that land in its gutter (mirrors the
+    // filter-range outline).
     if (bottom <= headerY || right <= headerX) return null
     const top  = Math.max(tl.y, headerY)
     const left = Math.max(tl.x, headerX)

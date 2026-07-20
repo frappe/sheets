@@ -780,6 +780,7 @@
         <hr class="sn-ctx-sep" />
         <Button variant="ghost" size="sm" iconLeft="layout"         label="Insert pivot table…"   @click="openPivotDialog()" />
         <Button variant="ghost" size="sm" iconLeft="bar-chart-2"    label="Insert chart…"          @click="openChartDialog()" />
+        <Button variant="ghost" size="sm" iconLeft="filter"         label="Insert slicer"          @click="insertSlicer()" />
       </template>
 
     </div>
@@ -1024,6 +1025,33 @@
       </template>
     </Dialog>
 
+    <!-- Slicers — floating value-filter controls bound to a filter column -->
+    <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
+         :style="{ left: sl.x + 'px', top: sl.y + 'px' }">
+      <div class="sn-slicer-head" @mousedown="startSlicerDrag(sl, $event)">
+        <Dropdown :options="slicerColMenu(sl)" placement="bottom-start" class="sn-slicer-colsel">
+          <template #default="{ open }">
+            <Button :variant="open ? 'subtle' : 'ghost'" size="sm" iconRight="chevron-down"
+                    :label="sl.label" tooltip="Filter column"
+                    @mousedown.stop @click.stop />
+          </template>
+        </Dropdown>
+        <Button variant="ghost" size="sm" icon="x" tooltip="Remove slicer"
+                @mousedown.stop @click="removeSlicer(sl)" />
+      </div>
+      <div class="sn-fp-vlinks sn-slicer-actions" @mousedown.stop>
+        <Button variant="ghost" size="sm" label="Select all" @click="selectAllSlicer(sl)" />
+        <Button variant="ghost" size="sm" label="Clear" :disabled="!sl.filtered" @click="clearSlicerValues(sl)" />
+      </div>
+      <div class="sn-slicer-values">
+        <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
+             class="sn-fp-value-row" @click="toggleSlicerValue(sl, row.v)">
+          <Checkbox :modelValue="row.checked" @update:modelValue="toggleSlicerValue(sl, row.v)" @click.stop />
+          <span class="sn-fp-value-text">{{ row.v === '' ? '(Blanks)' : row.v }}</span>
+        </div>
+      </div>
+    </div>
+
     <!-- Threaded comment panel (floating near cell) -->
     <div v-if="commentPanel.open" class="sn-comment-panel"
          :style="{ left: commentPanel.x + 'px', top: commentPanel.y + 'px' }">
@@ -1209,6 +1237,7 @@ import { formatScope }         from '../../engine/format-scope.js'
 import { createMergeEngine }   from '../../engine/merge.js'
 import { createClipboard }     from '../../engine/clipboard.js'
 import { createSortFilter }    from '../../engine/sortFilter.js'
+import { createSlicerEngine }  from '../../engine/slicers.js'
 import { createCommentsEngine }  from '../../engine/comments.js'
 import { createValidationEngine } from '../../engine/validation.js'
 import { createProtectionEngine } from '../../engine/protection.js'
@@ -1302,6 +1331,7 @@ const sheet = createSheet({
 const formats    = createFormatsEngine()
 const merge      = createMergeEngine()
 const sortFilter = createSortFilter(sheet)
+const slicers    = createSlicerEngine()
 const comments   = createCommentsEngine()
 const validation = createValidationEngine()
 const protection = createProtectionEngine()
@@ -1385,6 +1415,7 @@ const history = createHistory({
       formats:      formats.snapshot(),
       merge:        merge.snapshot(),
       sortFilter:   sortFilter.snapshot(),
+      slicers:      slicers.snapshot(),
       comments:     comments.snapshot(),
       validation:   validation.snapshot(),
       protection:   protection.snapshot(),
@@ -1410,6 +1441,7 @@ const history = createHistory({
     }
     if (snap.merge)       merge.restore(snap.merge)
     if (snap.sortFilter)  sortFilter.restore(snap.sortFilter)
+    if (snap.slicers)     slicers.restore(snap.slicers)
     if (snap.comments)    comments.restore(snap.comments)
     if (snap.validation)  validation.restore(snap.validation)
     if (snap.protection)  protection.restore(snap.protection)
@@ -2352,7 +2384,7 @@ const textWrapDropdownOptions = computed(() => [
 let _sheetTabs = null
 const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
-    sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, pivot,
+    sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, slicers, pivot,
     charts, namedRanges,
     getViewState:   () => _sheetTabs?.viewSnapshot?.() ?? grid?.viewSnapshot?.(),
     applyViewState: (s) => {
@@ -2371,7 +2403,7 @@ const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreat
 const isGuest  = computed(() => (window.frappe?.session?.user || 'Guest') === 'Guest')
 const readOnly = computed(() => !canWrite.value)
 
-_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
+_sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter, slicers], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
     _repopulateGrid()
     grid?.setMarchingAnts(null); clipboard.clear(); clipboardHas.value = false
@@ -2482,6 +2514,7 @@ const {
   getProtection:  () => protection,
   getCondFormat:  () => condFormat,
   getSortFilter:  () => sortFilter,
+  getSlicers:     () => slicers,
   getGrid:        () => grid,
   currentTitle,
   switchSheet,
@@ -2700,6 +2733,10 @@ const filterHighlightStyle = computed(() => {
   const headerX = ROW_HEADER_W * zoom
   const right   = br.x + br.width
   const bottom  = br.y + br.height
+  // When the range runs past the viewport the far borders sit off-screen and
+  // the grid-wrap's overflow:hidden clips them (Google-Sheets-style — no frame
+  // at the edge); the opaque scrollbar (z-index 16) covers any border that
+  // lands in its gutter while it's visible. So no viewport clamp here.
   if (bottom <= headerY || right <= headerX) return null
   const top  = Math.max(tl.y, headerY)
   const left = Math.max(tl.x, headerX)
@@ -4690,6 +4727,163 @@ function _removeFilter() {
   isDirty.value = true
 }
 
+// ── Slicers ────────────────────────────────────────────────────────────────
+// A slicer is a floating value-filter control bound to a column of the filter
+// range. It reads/writes that column's `inSet` spec in sortFilter; the slicers
+// engine only tracks the column + float position. `slicerVersion` is bumped on
+// every slicer/filter change so the panels re-derive their checklists.
+const slicerVersion = ref(0)
+let _slicerDrag = null
+
+// One reactive snapshot per slicer: the column picker's options, the value list
+// with PLAIN boolean checked flags, and whether a filter is active — all derived
+// together on each slicerVersion bump. The template binds to these plain values
+// (not to function calls over the non-reactive sortFilter engine), so the panel
+// can never drift out of sync with the applied filter.
+const activeSlicers = computed(() => {
+  slicerVersion.value
+  const sn      = currentSheet.value
+  const range   = sortFilter.getRange(sn)
+  const options = range ? _slicerColumnOptions(range, sn) : []
+  return slicers.list(sn).map(sl => {
+    const values = sortFilter.getColumnValues(sl.col, sn)
+    const spec   = sortFilter.getFilterConfig(sn)[sl.col]
+    const set    = spec?.operator === 'inSet' ? new Set(spec.values) : null   // null → unfiltered
+    return {
+      id: sl.id, col: sl.col, x: sl.x, y: sl.y,
+      label: slicerLabel(sl, sn),
+      options,
+      filtered: !!set,   // drives the Clear button's enabled state
+      rows: values.map(v => ({ v, checked: !set || set.has(v) })),
+    }
+  })
+})
+
+// Every column of the filter range, as { label: header, value: colIdx } — the
+// raw list the header dropdown is built from.
+function _slicerColumnOptions(range, sn) {
+  const opts = []
+  for (let c = range.c0; c <= range.c1; c++) {
+    const header = sheet.getDisplayValue(colLabel(c) + (range.r0 + 1), sn)
+    opts.push({ label: header || colLabel(c), value: c })
+  }
+  return opts
+}
+// frappe-ui Dropdown options for a slicer's column picker — a styled, teleported
+// popover (not a native <select>, which overflowed the floating panel). The
+// current column is marked so the menu reads like a real selector.
+function slicerColMenu(sl) {
+  return sl.options.map(o => ({
+    label: o.label,
+    icon: o.value === sl.col ? 'check' : null,
+    onClick: () => changeSlicerColumn(sl, o.value),
+  }))
+}
+
+function slicerValues(sl) { return sortFilter.getColumnValues(sl.col, sheet.getCurrentSheet()) }
+function slicerLabel(sl, sn = sheet.getCurrentSheet()) {
+  const range = sortFilter.getRange(sn)
+  const header = range ? sheet.getDisplayValue(colLabel(sl.col) + (range.r0 + 1), sn) : ''
+  return header || colLabel(sl.col)
+}
+// The set of values currently kept visible, or null when the column is unfiltered.
+function _slicerCheckedSet(sl) {
+  const spec = sortFilter.getFilterConfig(sheet.getCurrentSheet())[sl.col]
+  return spec?.operator === 'inSet' ? new Set(spec.values) : null
+}
+function toggleSlicerValue(sl, v) {
+  const all = slicerValues(sl)
+  const set = _slicerCheckedSet(sl) || new Set(all)
+  set.has(v) ? set.delete(v) : set.add(v)
+  _applySlicerFilter(sl, set, all)
+}
+// "Select all" always shows everything — it clears the column's filter outright
+// rather than toggling, so it can never surprise-hide the data.
+function selectAllSlicer(sl) {
+  const sn = sheet.getCurrentSheet()
+  sortFilter.clearFilter(sl.col, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
+}
+// "Clear" empties the selection (an inSet with no values) so the user can then
+// pick just the values they want — the Google-Sheets filter idiom.
+function clearSlicerValues(sl) {
+  const sn = sheet.getCurrentSheet()
+  sortFilter.setFilter(sl.col, { operator: 'inSet', values: [] }, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
+}
+// Re-point a slicer at a different column of the filter range; the old column's
+// filter is released so it stops hiding rows with no visible control.
+function changeSlicerColumn(sl, value) {
+  const sn     = sheet.getCurrentSheet()
+  const newCol = Number(value)
+  if (Number.isNaN(newCol) || newCol === sl.col) return
+  // Bail before touching anything if another slicer already owns the target —
+  // otherwise we'd clear this column's filter for a move that can't happen.
+  if (slicers.list(sn).some(s => s.col === newCol && s.id !== sl.id)) return
+  sortFilter.clearFilter(sl.col, sn)
+  slicers.setCol(sl.id, newCol, sn)
+  _repopulateGrid(); _applyHiddenRows(); history.push(); isDirty.value = true
+}
+function _applySlicerFilter(sl, set, all) {
+  const sn = sheet.getCurrentSheet()
+  // All-checked is identical to no filter — clear the column instead of storing
+  // every value (mirrors applyFilter).
+  if (set.size === all.length) sortFilter.clearFilter(sl.col, sn)
+  else                         sortFilter.setFilter(sl.col, { operator: 'inSet', values: [...set] }, sn)
+  _repopulateGrid()
+  _applyHiddenRows()
+  history.push()
+  isDirty.value = true
+  slicerVersion.value++
+}
+function insertSlicer() {
+  contextMenu.open = false
+  const sn  = sheet.getCurrentSheet()
+  const p   = parseCellId(activeCell.value)
+  const col = p ? p.col : 0
+  if (slicers.list(sn).some(s => s.col === col)) return   // column already has a slicer
+  // A slicer reads distinct values from the filter range — auto-create one over
+  // the surrounding data block if the sheet isn't filtered yet.
+  if (!sortFilter.getRange(sn)) {
+    const block = _detectContiguousBlock(p?.row ?? 0, col)
+    if (!block) return   // no data to slice
+    sortFilter.setRange(block, sn)
+  }
+  slicers.add(col, 96 + slicers.list(sn).length * 28, 96, sn)
+  _applyHiddenRows()      // paints the filter's chevrons/outline (and bumps slicerVersion)
+  grid?.render?.()
+  history.push()
+  isDirty.value = true
+}
+function removeSlicer(sl) {
+  const sn = sheet.getCurrentSheet()
+  slicers.remove(sl.id, sn)
+  // The slicer IS the filter control for its column — clear the filter it
+  // applied so removing it doesn't strand hidden rows with no visible control.
+  sortFilter.clearFilter(sl.col, sn)
+  _repopulateGrid()
+  _applyHiddenRows()      // un-hides the rows + bumps slicerVersion
+  history.push()
+  isDirty.value = true
+}
+function startSlicerDrag(sl, e) {
+  _slicerDrag = { id: sl.id, sx: e.clientX, sy: e.clientY, ox: sl.x, oy: sl.y }
+  window.addEventListener('mousemove', _onSlicerDrag)
+  window.addEventListener('mouseup', _endSlicerDrag)
+}
+function _onSlicerDrag(e) {
+  if (!_slicerDrag) return
+  const { id, sx, sy, ox, oy } = _slicerDrag
+  slicers.move(id, Math.max(0, ox + e.clientX - sx), Math.max(0, oy + e.clientY - sy), sheet.getCurrentSheet())
+  slicerVersion.value++
+}
+function _endSlicerDrag() {
+  if (_slicerDrag) { history.push(); isDirty.value = true }
+  _slicerDrag = null
+  window.removeEventListener('mousemove', _onSlicerDrag)
+  window.removeEventListener('mouseup', _endSlicerDrag)
+}
+
 function openFilterPanel(colIdx) {
   const sn  = sheet.getCurrentSheet()
   const cfg = sortFilter.getFilterConfig(sn)
@@ -5059,6 +5253,7 @@ function doInsertCol(right = false, count = 1) {
     protection.insertCol(atCol, sn)
     condFormat.insertCol(atCol, sn)
     sortFilter.insertCol(atCol, sn)
+    slicers.insertCol(atCol, sn)
     grid.shiftColWidths(atCol, 1)
   }
   _repopulateGrid()
@@ -5084,6 +5279,7 @@ function doDeleteCol() {
     protection.deleteCol(start, sn)
     condFormat.deleteCol(start, sn)
     sortFilter.deleteCol(start, sn)
+    slicers.deleteCol(start, sn)
     grid.shiftColWidths(start + 1, -1)
   }
   _repopulateGrid()
@@ -5239,6 +5435,9 @@ function _applyHiddenRows() {
   // Tag the filter subset so grid-painter can render those gaps with the
   // regular gridline color instead of the bold "rows hidden here" stroke.
   grid?.setFilterHiddenRows(filterHidden)
+  // The filter state just changed (panel, sort, undo, sheet switch, or a
+  // slicer) — refresh any open slicer's checklist so both controls agree.
+  slicerVersion.value++
 }
 
 function _applyHiddenCols() {
@@ -5883,6 +6082,15 @@ function toggleShowFormulas() {
 
 /* Comment panel */
 .sn-comment-panel  { position:fixed; z-index:8500; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 4px 16px rgba(0,0,0,.14); padding:12px; min-width:240px; display:flex; flex-direction:column; gap:8px; }
+
+/* Slicers — floating value-filter controls (matches the filter panel shell) */
+.sn-slicer        { position:fixed; z-index:8400; width:220px; background:var(--surface-modal); border:1px solid var(--outline-gray-modals); border-radius:10px; box-shadow:0 0 1px rgba(0,0,0,.35), 0 6px 8px -4px rgba(0,0,0,.1); padding:10px; display:flex; flex-direction:column; gap:8px; }
+.sn-slicer-head   { display:flex; align-items:center; gap:6px; cursor:move; user-select:none; }
+.sn-slicer-colsel { flex:1 1 auto; min-width:0; }
+.sn-slicer-colsel :deep(button) { width:100%; justify-content:space-between; font-weight:600; }
+.sn-slicer-colsel :deep(button > span) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sn-slicer-actions { margin:-2px 0; }
+.sn-slicer-values { max-height:220px; overflow-y:auto; border:1px solid var(--outline-gray-2); border-radius:8px; padding:4px 0; background:var(--surface-white); }
 .sn-comment-header { display:flex; align-items:center; justify-content:space-between; }
 .sn-comment-title  { font-size:12px; font-weight:600; letter-spacing:.04em; color:var(--ink-gray-7); text-transform:uppercase; }
 .sn-comment-close  { background:none; border:none; cursor:pointer; color:var(--ink-gray-5); font-size:14px; line-height:1; padding:2px 4px; }
@@ -5969,4 +6177,36 @@ function toggleShowFormulas() {
   max-height: min(60vh, 480px);
   overflow-y: auto;
 }
+/* Dropdown popovers are teleported to <body> with no z-index of their own, so
+   they'd stack below the floating slicer (z-index:8400) / context menu (9000).
+   A menu is always transient and topmost — keep it above every floating panel. */
+.dropdown-content { z-index: 9500; }
+
+/* Overlay scrollbars for the canvas grid. The elements are created imperatively
+   in canvas/scrollbars.js (appended to .sn-grid-wrap), so they carry no scoped
+   data-attr — these rules must live in the UNSCOPED block to reach them. */
+/* z-index sits above the filter (14) / pivot (15) range outlines so the opaque
+   track paints over any outline border that reaches the scrollbar gutter, but
+   below the notes drawer (30) and popovers. */
+.sn-sb          { position:absolute; z-index:16; background:var(--surface-menu-bar, #f8f8f8);
+                  border:0 solid var(--outline-gray-2, #e2e2e2);
+                  opacity:1; transition:opacity .2s ease; }
+.sn-sb-v        { top:0; right:0; width:12px; border-left-width:1px; }
+.sn-sb-h        { left:0; bottom:0; height:12px; border-top-width:1px; }
+.sn-sb-corner   { position:absolute; z-index:16; right:0; bottom:0; width:12px; height:12px;
+                  background:var(--surface-menu-bar, #f8f8f8);
+                  border-left:1px solid var(--outline-gray-2, #e2e2e2);
+                  border-top:1px solid var(--outline-gray-2, #e2e2e2);
+                  opacity:1; transition:opacity .2s ease; }
+/* Auto-hidden state — faded out and click-through so cells under the gutter
+   stay reachable. JS (canvas/scrollbars.js) toggles this on inactivity. */
+.sn-sb--hidden  { opacity:0; pointer-events:none; }
+.sn-sb-thumb    { position:absolute; border-radius:6px; background:var(--ink-gray-4, #b8b8b8);
+                  transition:background .12s ease; cursor:grab; touch-action:none; }
+.sn-sb-dragging .sn-sb-thumb { cursor:grabbing; }
+.sn-sb-v .sn-sb-thumb { top:0; left:2px; right:2px; }
+.sn-sb-h .sn-sb-thumb { left:0; top:2px; bottom:2px; }
+.sn-sb-thumb:hover           { background:var(--ink-gray-5, #7c7c7c); }
+.sn-sb-dragging .sn-sb-thumb { background:var(--ink-gray-6, #6b6b6b); }
+.sn-sb-dragging              { cursor:grabbing; user-select:none; }
 </style>
