@@ -1041,7 +1041,7 @@
       </div>
       <div class="sn-fp-vlinks sn-slicer-actions" @mousedown.stop>
         <Button variant="ghost" size="sm" label="Select all" @click="selectAllSlicer(sl)" />
-        <Button variant="ghost" size="sm" label="Clear" :disabled="!sl.filtered" @click="clearSlicerValues(sl)" />
+        <Button variant="ghost" size="sm" label="Clear" @click="clearSlicerValues(sl)" />
       </div>
       <div class="sn-slicer-values">
         <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
@@ -4753,7 +4753,6 @@ const activeSlicers = computed(() => {
       id: sl.id, col: sl.col, x: sl.x, y: sl.y,
       label: slicerLabel(sl, sn),
       options,
-      filtered: !!set,   // drives the Clear button's enabled state
       rows: values.map(v => ({ v, checked: !set || set.has(v) })),
     }
   })
@@ -6179,10 +6178,12 @@ function toggleShowFormulas() {
   max-height: min(60vh, 480px);
   overflow-y: auto;
 }
-/* Dropdown popovers are teleported to <body> with no z-index of their own, so
-   they'd stack below the floating slicer (z-index:8400) / context menu (9000).
-   A menu is always transient and topmost — keep it above every floating panel. */
-.dropdown-content { z-index: 9500; }
+/* reka-ui copies the popover's computed z-index onto its teleported wrapper, and
+   frappe-ui ships `.dropdown-content { z-index:50 }` — below the floating slicer
+   (8400) / context menu (9000), so the column menu rendered behind the panel.
+   The doubled class outranks that single-class default; a menu is transient and
+   must sit above every floating panel. */
+.dropdown-content.dropdown-content { z-index: 9500; }
 
 /* Overlay scrollbars for the canvas grid. The elements are created imperatively
    in canvas/scrollbars.js (appended to .sn-grid-wrap), so they carry no scoped
