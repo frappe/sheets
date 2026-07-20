@@ -1044,7 +1044,7 @@
         <Button variant="ghost" size="sm" label="Clear" @click="clearSlicerValues(sl)" />
       </div>
       <div class="sn-slicer-values">
-        <div v-for="row in sl.rows" :key="row.v || '__blanks__'"
+        <div v-for="row in sl.rows" :key="'v:' + row.v"
              class="sn-fp-value-row" @click="toggleSlicerValue(sl, row.v)">
           <Checkbox :modelValue="row.checked" @update:modelValue="toggleSlicerValue(sl, row.v)" @click.stop />
           <span class="sn-fp-value-text">{{ row.v === '' ? '(Blanks)' : row.v }}</span>
@@ -4848,6 +4848,11 @@ function insertSlicer() {
     if (!block) return   // no data to slice
     sortFilter.setRange(block, sn)
   }
+  // A slicer filters one column OF the filter range. A column outside it has no
+  // values to show and can't appear in the column picker — refuse rather than
+  // strand a dead slicer. (Auto-created ranges are centred on col, so they pass.)
+  const range = sortFilter.getRange(sn)
+  if (!range || col < range.c0 || col > range.c1) return
   slicers.add(col, 96 + slicers.list(sn).length * 28, 96, sn)
   _applyHiddenRows()      // paints the filter's chevrons/outline (and bumps slicerVersion)
   grid?.render?.()
