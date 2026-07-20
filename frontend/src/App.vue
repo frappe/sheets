@@ -65,6 +65,15 @@ function onSaved(name)  { currentId.value = name;  history.replaceState({}, '', 
    above. Bump them past the overlay so they remain visible. */
 .dropdown-content { z-index: 50; }
 
+/* The overlay above sits ABOVE the grid, but its scrim is only ~12% black —
+   translucent. Absolutely-positioned grid decorations that span the whole data
+   region (the filter-range outline and pivot-output highlight, both full-height
+   dark 1.5px borders) therefore stay visible THROUGH the scrim, drawing a line
+   that flanks the open dialog. Hide those decorations whenever a dialog is up.
+   `.dialog-overlay` portals to <body>, so `:has` from body catches every one. */
+body:has(.dialog-overlay) .sn-filter-range,
+body:has(.dialog-overlay) .sn-pivot-highlight { display: none; }
+
 /* Hidden on desktop; shown via @media on narrow viewports. position:fixed
    over everything (max z-index) covers any underlying app surface without
    unmounting it. */
