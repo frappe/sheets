@@ -468,13 +468,22 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     const cursor = input.selectionStart
     if (item.kind === 'range') {
       // Splice the suggested ref in at the caret (which sits just after the
-      // opening paren). Keep the highlight lit until the formula commits.
+      // opening paren).
       const newVal = input.value.slice(0, cursor) + item.name + input.value.slice(cursor)
       input.value  = newVal
       const pos    = cursor + item.name.length
       input.setSelectionRange(pos, pos)
       onInput?.(cellId(sel.r, sel.c), newVal)
-      _sugActive = false            // the ref is now committed text, not a suggestion
+      // Promote the accepted suggestion to a real pick so the highlight is
+      // owned exactly like a click-picked ref — cleared on commit/cancel, and
+      // extendable from its origin on the next click — instead of lingering as
+      // a stale, unowned suggestion. Set `pickMouseAnchor` (survives with no
+      // active drag) but NOT `picker`: `picker` marks an in-flight drag, and
+      // the mousemove handler would rewrite the ref on the next pointer move.
+      const rr = item.rect
+      pickerRect      = { r0: rr.r0, c0: rr.c0, r1: rr.r1, c1: rr.c1 }
+      pickMouseAnchor = { r: rr.r0, c: rr.c0 }
+      _sugActive      = false       // the ref is now committed text, not a suggestion
       _acHide()
       input.focus()
       render()

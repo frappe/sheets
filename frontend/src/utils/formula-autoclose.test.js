@@ -10,9 +10,9 @@ describe('autoCloseKey', () => {
     expect(autoCloseKey('(', '=SUM', 4, 4)).toEqual({ value: '=SUM()', caret: 5 })
   })
 
-  it('wraps a selection when ( is typed over it', () => {
-    // caret span covers "A1" in "=A1"
-    expect(autoCloseKey('(', '=A1', 1, 3)).toEqual({ value: '=(A1)', caret: 2 })
+  it('wraps a selection when ( is typed over it and lands past the )', () => {
+    // caret span covers "A1" in "=A1"; caret ends after the inserted ')'
+    expect(autoCloseKey('(', '=A1', 1, 3)).toEqual({ value: '=(A1)', caret: 5 })
   })
 
   it('steps over an existing ) instead of duplicating it', () => {
