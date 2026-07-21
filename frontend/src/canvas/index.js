@@ -435,9 +435,11 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   function _acHide() {
     _acItems = []; _acIdx = 0
-    // A live range suggestion owns pickerRect — drop that highlight too. The
-    // range-accept path pre-clears _sugActive so its inserted ref stays lit.
-    if (_sugActive) { _sugActive = false; pickerRect = null }
+    // A live range suggestion owns pickerRect — drop that highlight too, and
+    // repaint so it actually leaves the canvas (the Escape path returns without
+    // its own render()). The range-accept path pre-clears _sugActive so its
+    // inserted ref stays lit.
+    if (_sugActive) { _sugActive = false; pickerRect = null; render() }
     if (_acEl) _acEl.style.display = 'none'
   }
 
