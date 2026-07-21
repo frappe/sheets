@@ -132,12 +132,12 @@ describe('closeAc', () => {
 })
 
 describe('commitAc', () => {
-  it('inserts function name with ( suffix into formulaValue', () => {
+  it('inserts function name with auto-closed () into formulaValue', () => {
     const { commitAc, formulaValue, formulaInputRef } = makeAc()
     formulaValue.value = '=SU'
     formulaInputRef.value = { selectionStart: 3, value: '=SU', setSelectionRange: () => {} }
     commitAc({ name: 'SUM', kind: 'fn' })
-    expect(formulaValue.value).toBe('=SUM(')
+    expect(formulaValue.value).toBe('=SUM()')
   })
 
   it('inserts sheet name with ! suffix', () => {

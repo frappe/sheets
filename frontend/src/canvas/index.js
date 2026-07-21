@@ -4,7 +4,8 @@ import { createOverlay }  from './overlay.js'
 import { createScrollbars } from './scrollbars.js'
 import { TOTAL_ROWS, TOTAL_COLS, DEFAULT_TOTAL_ROWS, DEFAULT_TOTAL_COLS, DEFAULT_ROW_H, ROW_HEADER_W, COL_HEADER_H, setTotalRows, setTotalCols } from './constants.js'
 import { cellId, colLabel, parseCellId } from '../utils/cells.js'
-import { AC_FUNS, AC_FUN_KEYS, parseAcToken, parseSignatureContext, describeSignature } from '../utils/formula-ac.js'
+import { AC_FUNS, AC_FUN_KEYS, parseAcToken, parseSignatureContext, describeSignature, shouldSuggestRange, detectAdjacentRange, isNumericText } from '../utils/formula-ac.js'
+import { autoCloseKey } from '../utils/formula-autoclose.js'
 import { isWrapText } from '../utils/text-wrap.js'
 import { CHIP, chipMetrics } from './chip-geometry.js'
 import { checkboxRect } from './checkbox-geometry.js'
@@ -345,13 +346,43 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     canvas.parentElement.appendChild(_acEl)
   }
 
-  // _acItems: { name, kind: 'fn' | 'sheet' }[]
+  // Drop a passive range-suggestion highlight (never touches a real pick).
+  function _clearSuggestion() {
+    if (!_sugActive) return
+    _sugActive = false
+    pickerRect = null
+    render()
+  }
+
+  // Build the { kind:'range', name, rect } suggestion for an empty SUM-style
+  // first argument, or null when there's nothing sensible to offer.
+  function _suggestRangeItem(value, cursor) {
+    if (!shouldSuggestRange(value, cursor)) return null
+    const rect = detectAdjacentRange(sel.r, sel.c, (r, c) => isNumericText(getValue(cellId(r, c))))
+    if (!rect) return null
+    const name = _refForRange(rect.r0, rect.c0, rect.r1, rect.c1, _crossSheetName())
+    return { kind: 'range', name, rect }
+  }
+
+  // _acItems: { name, kind: 'fn' | 'sheet' | 'range' }[]
   function _acUpdate(value, cursor) {
     if (!_acEl) return
+    _clearSuggestion()
     const result = parseAcToken(value, cursor)
-    // No name being typed — fall back to parameter help if the caret is inside
-    // a known function's parens. Leaves _acItems empty so key nav ignores it.
-    if (!result) { _acShowSignature(value, cursor); return }
+    if (!result) {
+      // Empty first arg of a SUM-style function — offer the adjacent numeric
+      // run as a one-tap range (Google Sheets behaviour). Otherwise fall back
+      // to passive parameter help. Both leave _acItems empty for key nav only
+      // in the signature case; the range item IS selectable.
+      const sug = _suggestRangeItem(value, cursor)
+      if (sug) {
+        _acItems = [sug]; _acIdx = 0
+        pickerRect = sug.rect; _sugActive = true
+        _acRender(); render()
+        return
+      }
+      _acShowSignature(value, cursor); return
+    }
     const up     = result.tok.toUpperCase()
     const fns    = AC_FUN_KEYS.filter(n => n.startsWith(up)).slice(0, 6)
     const sheets = (getSheetNames?.() || [])
@@ -374,7 +405,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
       row.style.cssText = `display:flex;align-items:baseline;gap:10px;padding:6px 12px;cursor:pointer;white-space:nowrap;border-radius:4px;${i === _acIdx ? 'background:#f3f3f3;' : ''}`
       const right = item.kind === 'sheet'
         ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#0891b2;background:#ecfeff;border-radius:3px;padding:1px 5px;">sheet</span>`
-        : `<span style="font-size:11px;color:#7c7c7c;">${AC_FUNS[item.name]}</span>`
+        : item.kind === 'range'
+          ? `<span style="font-size:11px;color:#7c7c7c;">Tab to fill range</span>`
+          : `<span style="font-size:11px;color:#7c7c7c;">${AC_FUNS[item.name]}</span>`
       row.innerHTML = `<span style="font-weight:600;min-width:80px;color:#171717;">${item.name}</span>${right}`
       row.addEventListener('mousedown', e => { e.preventDefault(); _acCommit(item) })
       row.addEventListener('mouseover', () => { _acIdx = i; _acHighlight() })
@@ -402,6 +435,9 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   function _acHide() {
     _acItems = []; _acIdx = 0
+    // A live range suggestion owns pickerRect — drop that highlight too. The
+    // range-accept path pre-clears _sugActive so its inserted ref stays lit.
+    if (_sugActive) { _sugActive = false; pickerRect = null }
     if (_acEl) _acEl.style.display = 'none'
   }
 
@@ -426,22 +462,38 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     _acEl.style.display = 'block'
   }
 
-  // item: { name, kind: 'fn' | 'sheet' }
+  // item: { name, kind: 'fn' | 'sheet' | 'range' }
   function _acCommit(item) {
     const input  = overlay.el
     const cursor = input.selectionStart
+    if (item.kind === 'range') {
+      // Splice the suggested ref in at the caret (which sits just after the
+      // opening paren). Keep the highlight lit until the formula commits.
+      const newVal = input.value.slice(0, cursor) + item.name + input.value.slice(cursor)
+      input.value  = newVal
+      const pos    = cursor + item.name.length
+      input.setSelectionRange(pos, pos)
+      onInput?.(cellId(sel.r, sel.c), newVal)
+      _sugActive = false            // the ref is now committed text, not a suggestion
+      _acHide()
+      input.focus()
+      render()
+      return
+    }
     const result = parseAcToken(input.value, cursor)
     if (result) {
       const { tokStart } = result
-      const suffix = item.kind === 'sheet' ? '!' : '('
+      // A function accepts an auto-closed '()' with the caret between; a sheet
+      // gets a trailing '!'. Caret lands one char past the name either way.
+      const suffix = item.kind === 'sheet' ? '!' : '()'
       const newVal = input.value.slice(0, tokStart) + item.name + suffix + input.value.slice(cursor)
       input.value  = newVal
       const pos    = tokStart + item.name.length + 1
       input.setSelectionRange(pos, pos)
       onInput?.(cellId(sel.r, sel.c), newVal)
       input.focus()
-      // Accepting a function inserts its '(' — surface its parameter help
-      // immediately instead of leaving the user with a bare, empty popup.
+      // Caret now sits inside the fresh '(' — surface a range suggestion or
+      // parameter help instead of leaving the user with a bare, empty popup.
       _acUpdate(newVal, pos)
       return
     }
@@ -470,6 +522,12 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   // arrow keys while editing a formula at a ref-acceptable caret position.
   // Going to null returns us to EDITING (text caret moves). See _pickerKb*.
   let pickerKb   = null  // { target, anchorR, anchorC, headR, headC, insertStart, insertEnd, savedValue, savedCaret }
+  // Anchor for click-to-extend range picking. Survives mouseup (unlike
+  // `picker`) so the next click extends the ref from the first-clicked cell.
+  let pickMouseAnchor = null  // { r, c }
+  // True while `pickerRect` is a passive range *suggestion* (not a real pick),
+  // so we know it's safe to clear when the suggestion goes away.
+  let _sugActive = false
 
   function _pickTarget() {
     const ae = document.activeElement
@@ -531,6 +589,8 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     picker = null
     pickerKb = null
     pickerRect = null
+    pickMouseAnchor = null
+    _sugActive = false
     render()
   }
 
@@ -775,10 +835,27 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
 
   overlay.el.addEventListener('keydown', e => {
     if (_acItems.length) {
+      const cur = _acItems[_acIdx]
+      // A range suggestion accepts on Tab only; Enter falls through to commit
+      // the formula (so an unwanted guess never hijacks Enter). Fn/sheet items
+      // accept on either key.
+      const acceptKey = cur && cur.kind === 'range' ? e.key === 'Tab' : (e.key === 'Tab' || e.key === 'Enter')
       if (e.key === 'ArrowDown') { e.preventDefault(); _acIdx = Math.min(_acIdx + 1, _acItems.length - 1); _acHighlight(); return }
       if (e.key === 'ArrowUp')   { e.preventDefault(); _acIdx = Math.max(_acIdx - 1, 0); _acHighlight(); return }
-      if ((e.key === 'Tab' || e.key === 'Enter') && _acItems[_acIdx]) { e.preventDefault(); _acCommit(_acItems[_acIdx]); return }
+      if (acceptKey && cur) { e.preventDefault(); _acCommit(cur); return }
       if (e.key === 'Escape')    { _acHide(); return }
+    }
+    // Auto-close parens (`(` → `()`, `)` steps over, Backspace clears an empty
+    // pair) — only inside a formula. Handle before the picker/nav branches so
+    // typing `(` never leaks into them.
+    const ac = autoCloseKey(e.key, overlay.el.value, overlay.el.selectionStart, overlay.el.selectionEnd)
+    if (ac) {
+      e.preventDefault()
+      if (pickerKb) _pickerKbCommit()   // finalize an in-progress keyboard pick first
+      overlay.el.value = ac.value
+      overlay.el.setSelectionRange(ac.caret, ac.caret)
+      overlay.el.dispatchEvent(new Event('input', { bubbles: true }))
+      return
     }
     // Commit any active cell-ref pick when the user types a printable char
     // (e.g. '+' after picking C1) so the next arrow key starts a fresh ref
@@ -1032,9 +1109,26 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
         const mid = getMasterId(cellId(h.r, h.c))
         if (mid) { const p = parseCellId(mid); if (p) { tr = p.row; tc = p.col } }
       }
-      _writeRef(pickInput, _refForRange(tr, tc, tr, tc, _crossSheetName()), _refReplaceStart(pickInput))
-      picker     = { anchorR: tr, anchorC: tc, target: pickInput, kind: 'cell' }
-      pickerRect = { r0: tr, c0: tc, r1: tr, c1: tc }
+      // Range picking by click (Google Sheets style). A plain click writes a
+      // single-cell ref and remembers it as the anchor; the NEXT click extends
+      // from that anchor to here → A1:A3, no drag or modifier needed. The
+      // anchor only "continues" while the last-picked ref still abuts the caret
+      // (the user hasn't typed since) — so typing an operator/comma, or picking
+      // in a new argument, resets to a fresh ref. Shift+click always extends.
+      // pickMouseAnchor outlives `picker` (which mouseup clears).
+      const rStart   = _refReplaceStart(pickInput)
+      const abutting = pickInput.value.slice(rStart, pickInput.selectionStart)
+      const lastRef  = (pickerRect && !_sugActive)
+        ? _refForRange(pickerRect.r0, pickerRect.c0, pickerRect.r1, pickerRect.c1, _crossSheetName())
+        : null
+      const continuing = !!pickMouseAnchor && lastRef !== null && abutting === lastRef
+      const anchor = ((e.shiftKey || continuing) && pickMouseAnchor) ? pickMouseAnchor : { r: tr, c: tc }
+      const r0 = Math.min(anchor.r, tr), r1 = Math.max(anchor.r, tr)
+      const c0 = Math.min(anchor.c, tc), c1 = Math.max(anchor.c, tc)
+      _writeRef(pickInput, _refForRange(r0, c0, r1, c1, _crossSheetName()), rStart)
+      picker     = { anchorR: anchor.r, anchorC: anchor.c, target: pickInput, kind: 'cell' }
+      pickerRect = { r0, c0, r1, c1 }
+      pickMouseAnchor = anchor   // keep the origin so the next click re-extends
       pickerKb   = null   // mouse-pick supersedes any keyboard pick state
       render()
       return

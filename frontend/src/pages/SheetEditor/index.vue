@@ -1227,6 +1227,7 @@ import { call } from '../../utils/api.js'
 import { getSessionUser, userInitials } from '../../utils/session.js'
 import { parseNumberFmt, buildNumberFmt, applyNumberFmt } from '../../utils/format-number.js'
 import { getTextWrap } from '../../utils/text-wrap.js'
+import { autoCloseKey } from '../../utils/formula-autoclose.js'
 import { computeFillDown, computeFillRight } from '../../engine/fill-series.js'
 import { detectSeries }                       from '../../engine/patterns/index.js'
 import { adjustFormula }                    from '../../engine/formula-adjust.js'
@@ -3777,6 +3778,16 @@ function onFormulaKey(e) {
     if (e.key === 'ArrowUp')   { e.preventDefault(); acIdx.value = Math.max(acIdx.value - 1, 0); return }
     if ((e.key === 'Tab' || e.key === 'Enter') && acItems.value[acIdx.value]) { e.preventDefault(); commitAc(acItems.value[acIdx.value]); return }  // item obj
     if (e.key === 'Escape') { acItems.value = []; return }
+  }
+  // Auto-close parens in the formula bar, mirroring the in-cell editor.
+  const ac = autoCloseKey(e.key, e.target.value, e.target.selectionStart, e.target.selectionEnd)
+  if (ac) {
+    e.preventDefault()
+    const el = e.target
+    formulaValue.value = ac.value
+    updateAc(ac.value, ac.caret)
+    nextTick(() => el.setSelectionRange(ac.caret, ac.caret))
+    return
   }
   if (e.key === 'Enter' || e.key === 'Tab') {
     e.preventDefault()

@@ -34,7 +34,9 @@ export function useFormulaAutocomplete({ formulaInputRef, formulaValue, sheetNam
     if (!result) { acItems.value = []; return }
     const { tok: _tok, tokStart } = result
     const cursor = input.selectionStart
-    const suffix = item.kind === 'sheet' ? '!' : '('
+    // Functions get an auto-closed '()' with the caret landing inside; sheets
+    // get a trailing '!'. Caret sits one char past the name in both cases.
+    const suffix = item.kind === 'sheet' ? '!' : '()'
     formulaValue.value = input.value.slice(0, tokStart) + item.name + suffix + input.value.slice(cursor)
     nextTick(() => {
       const pos = tokStart + item.name.length + 1

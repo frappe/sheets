@@ -88,6 +88,57 @@ export function parseSignatureContext(value, cursor) {
   return null
 }
 
+// Functions where an adjacent numeric run is a sensible first-argument guess.
+// Kept narrow so we never nudge a range into e.g. IF( or CONCAT(.
+export const RANGE_SUGGEST_FUNS = new Set([
+  'SUM', 'AVERAGE', 'COUNT', 'COUNTA', 'MAX', 'MIN', 'PRODUCT', 'MEDIAN',
+])
+
+/**
+ * True when the caret sits at the empty first argument of a range-friendly
+ * function — the spot where Google Sheets offers an adjacent-range guess.
+ * Requires the arg to be empty on both sides so `=SUM(A1)` never re-suggests.
+ */
+export function shouldSuggestRange(value, cursor) {
+  const ctx = parseSignatureContext(value, cursor)
+  if (!ctx || ctx.argIndex !== 0 || !RANGE_SUGGEST_FUNS.has(ctx.fn)) return false
+  const left = value.slice(0, cursor).replace(/\s+$/, '')
+  if (!left.endsWith('(')) return false
+  const right = value.slice(cursor).replace(/^\s+/, '')
+  return right === '' || right.startsWith(')') || right.startsWith(',')
+}
+
+/**
+ * True when a display string reads as a number (tolerating currency symbols,
+ * thousands separators, percent and surrounding space) — used to decide which
+ * cells belong to a suggested range.
+ */
+export function isNumericText(v) {
+  if (v == null) return false
+  const stripped = String(v).replace(/[$€£₹%,\s]/g, '')
+  return stripped !== '' && Number.isFinite(Number(stripped))
+}
+
+/**
+ * Walk up (then left) from the active cell over a contiguous run of numeric
+ * cells — the adjacency Google Sheets guesses for SUM-style ranges.
+ * `isNumericAt(r, c)` reports whether that cell holds a number. Returns
+ * { r0, c0, r1, c1 } or null when no run of >= 2 cells abuts the cell.
+ */
+export function detectAdjacentRange(r, c, isNumericAt) {
+  if (r - 1 >= 0 && isNumericAt(r - 1, c)) {
+    let top = r - 1
+    while (top - 1 >= 0 && isNumericAt(top - 1, c)) top--
+    if (r - top >= 2) return { r0: top, c0: c, r1: r - 1, c1: c }
+  }
+  if (c - 1 >= 0 && isNumericAt(r, c - 1)) {
+    let left = c - 1
+    while (left - 1 >= 0 && isNumericAt(r, left - 1)) left--
+    if (c - left >= 2) return { r0: r, c0: left, r1: r, c1: c - 1 }
+  }
+  return null
+}
+
 /**
  * Split a function's signature into its parameter names and mark which one is
  * active for the given argument index. The trailing variadic param (`...`)
