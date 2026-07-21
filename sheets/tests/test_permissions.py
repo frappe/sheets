@@ -118,5 +118,50 @@ class HasPermission(unittest.TestCase):
 			)
 
 
+class CanWriteSheet(unittest.TestCase):
+	"""The public-edit link: write via real perm OR a public_write sheet."""
+
+	def test_real_write_perm_short_circuits(self):
+		with mock.patch("sheets.permissions.frappe") as f:
+			f.session.user = "alice@example.com"
+			f.has_permission.return_value = True
+			self.assertTrue(permissions.can_write_sheet("SH-1"))
+			# We never fall through to the public-flag lookup.
+			f.db.get_value.assert_not_called()
+
+	def test_guest_never_writes_even_on_public_write(self):
+		with mock.patch("sheets.permissions.frappe") as f:
+			f.session.user = "Guest"
+			f.has_permission.return_value = False
+			self.assertFalse(permissions.can_write_sheet("SH-1"))
+			# Guests are refused before the public-flag lookup runs.
+			f.db.get_value.assert_not_called()
+
+	def test_signed_in_user_writes_via_public_write_link(self):
+		with mock.patch("sheets.permissions.frappe") as f:
+			f.session.user = "bob@example.com"
+			f.has_permission.return_value = False
+			f.db.get_value.return_value = {"is_public": 1, "public_write": 1}
+			self.assertTrue(permissions.can_write_sheet("SH-1"))
+
+	def test_public_view_only_link_is_not_writable(self):
+		with mock.patch("sheets.permissions.frappe") as f:
+			f.session.user = "bob@example.com"
+			f.has_permission.return_value = False
+			f.db.get_value.return_value = {"is_public": 1, "public_write": 0}
+			self.assertFalse(permissions.can_write_sheet("SH-1"))
+
+	def test_assert_raises_permission_error_when_denied(self):
+		with mock.patch("sheets.permissions.frappe") as f:
+			f.session.user = "bob@example.com"
+			f.has_permission.return_value = False
+			f.db.get_value.return_value = {"is_public": 0, "public_write": 0}
+			f.PermissionError = type("PermissionError", (Exception,), {})
+			f.throw.side_effect = lambda msg, exc=Exception: (_ for _ in ()).throw(exc(msg))
+			f._ = lambda s: s
+			with self.assertRaises(f.PermissionError):
+				permissions.assert_can_write_sheet("SH-1")
+
+
 if __name__ == "__main__":
 	unittest.main()

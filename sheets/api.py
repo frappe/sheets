@@ -2,6 +2,7 @@ import json
 
 import frappe
 
+from sheets.permissions import assert_can_write_sheet, can_write_sheet
 from sheets.sheets.doctype.sheet.cell_codec import cell_map as unpack_cell_map
 from sheets.sheets.doctype.sheet.storage import decode_sheets_data
 from sheets.versioning import save as save_mod
@@ -46,7 +47,8 @@ def ping_presence(name: str) -> None:
 @frappe.whitelist()
 def broadcast_op(name: str, op: str) -> None:
 	"""Broadcast a cell-op JSON string to all clients watching this sheet."""
-	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
+	# Honour the public-edit link: a signed-in public editor may broadcast ops.
+	assert_can_write_sheet(name)
 	frappe.publish_realtime(
 		"sheet_op",
 		{"sheet": name, "user": frappe.session.user, "op": op},
@@ -98,11 +100,19 @@ def yjs_relay(name: str, event: str, payload: str) -> None:
 	permission so a read-only viewer can't push CRDT updates that other
 	clients will apply locally. Presence and state-request events are
 	read-side affordances.
+
+	Both gates honour the public link (mirroring ``get_sheet``): a signed-in
+	public editor may push updates, and anyone with the link may read — so a
+	public sheet's realtime sync works, not just its static load.
 	"""
 	if event not in _YJS_EVENTS:
 		frappe.throw(f"Unknown yjs event: {event}")
-	ptype = "write" if event in _YJS_WRITE_EVENTS else "read"
-	frappe.has_permission("Sheet", doc=name, ptype=ptype, throw=True)
+	if event in _YJS_WRITE_EVENTS:
+		assert_can_write_sheet(name)
+	elif not frappe.has_permission("Sheet", doc=name, ptype="read", throw=False) and not frappe.db.get_value(
+		"Sheet", name, "is_public"
+	):
+		frappe.throw(f"No read access to sheet {name}", frappe.PermissionError)
 	frappe.publish_realtime(
 		event,
 		{"sheet": name, "user": frappe.session.user, "payload": payload},
@@ -148,18 +158,28 @@ def get_sheet_shares(name: str) -> list:
 
 
 @frappe.whitelist()
-def set_sheet_public(name: str, public: int = 0) -> dict:
-	"""Toggle the public, view-only link for a sheet.
+def set_sheet_public(name: str, public: int = 0, write: int = 0) -> dict:
+	"""Toggle the public link for a sheet, and whether it grants edit.
 
-	Public access is a single boolean on the Sheet — `is_public`. When on,
-	anyone with the link can open the sheet read-only (no login required, see
-	`get_sheet`'s `allow_guest`). It is deliberately view-only: there is no
-	public-edit. Gated by `ptype="share"` so only the owner (or someone the
-	owner granted the share right) can expose a sheet.
+	Two flags on the Sheet drive public access:
+
+	  * `is_public` — anyone with the link can open the sheet (no login
+	    required, see `get_sheet`'s `allow_guest`).
+	  * `public_write` — when the link is public *and* this is on, any
+	    signed-in user with the link can edit, not just view. Guests stay
+	    view-only (they can't reach the write endpoints at all).
+
+	`public_write` is only meaningful while `is_public` is on, so turning the
+	link off (or never turning it on) forces `public_write` back to 0 — you
+	can't have an editable link that nobody can open. Gated by `ptype="share"`
+	so only the owner (or someone the owner granted the share right) can
+	expose a sheet.
 	"""
 	frappe.has_permission("Sheet", doc=name, ptype="share", throw=True)
-	frappe.db.set_value("Sheet", name, "is_public", 1 if int(public or 0) else 0)
-	return {"status": "ok", "is_public": bool(int(public or 0))}
+	is_public = 1 if int(public or 0) else 0
+	public_write = 1 if (is_public and int(write or 0)) else 0
+	frappe.db.set_value("Sheet", name, {"is_public": is_public, "public_write": public_write})
+	return {"status": "ok", "is_public": bool(is_public), "public_write": bool(public_write)}
 
 
 @frappe.whitelist()
@@ -292,7 +312,8 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 	# skip the permission check. Private sheets keep the exact old behaviour:
 	# `frappe.get_doc` does NOT check read permission by itself, so without
 	# this guard any caller who knows a sheet id could exfiltrate its contents.
-	is_public = bool(frappe.db.get_value("Sheet", name, "is_public"))
+	access = frappe.db.get_value("Sheet", name, ["is_public", "public_write"], as_dict=True) or {}
+	is_public = bool(access.get("is_public"))
 	if not is_public:
 		frappe.has_permission("Sheet", doc=name, throw=True)
 	doc = frappe.get_doc("Sheet", name)
@@ -308,16 +329,16 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 	# explicit write flag so the editor can render read-only (dim the toolbar,
 	# lock the grid, hide the save path) instead of letting a viewer type into a
 	# doc they can't persist and only discovering it when save_sheet throws.
-	# Guests and public viewers are always view-only; logged-in users get their
-	# real write right. Public access is view-only by design — no public-edit.
-	can_write = frappe.session.user != "Guest" and bool(
-		frappe.has_permission("Sheet", doc=name, ptype="write", throw=False)
-	)
+	# `can_write_sheet` folds in the public-edit link: a signed-in user gets
+	# write either from their real permission or from a `public_write` sheet.
+	# Guests are always view-only (and can't reach the write endpoints anyway).
+	can_write = frappe.session.user != "Guest" and can_write_sheet(name)
 	return {
 		"name": doc.name,
 		"title": doc.title,
 		"sheets_data": raw if frappe.utils.cint(compressed) else decode_sheets_data(raw),
 		"is_public": is_public,
+		"public_write": bool(access.get("public_write")),
 		"can_write": can_write,
 	}
 
@@ -433,8 +454,8 @@ def rename_sheet(name: str, title: str) -> str:
 	# Explicit gate up-front so the failure mode is the same as the rest of
 	# this module — `doc.save()` would ultimately enforce write perm too,
 	# but defence-in-depth keeps the surface uniform if the controller ever
-	# changes.
-	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
+	# changes. Honours the public-edit link (a rename is a content edit).
+	assert_can_write_sheet(name)
 	title = _clean_title(title)
 	if not title:
 		frappe.throw("Title is required")
@@ -527,8 +548,9 @@ def ai_assist(name: str, prompt: str, selection: str) -> dict:
 	frontend applies the actions through the engine so they join the existing
 	undo / op-log / autosave pipeline.
 	"""
-	# AI mutates the grid → require write permission, matching save/record_op.
-	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
+	# AI mutates the grid → require write permission, matching save/record_op
+	# (and honouring the public-edit link).
+	assert_can_write_sheet(name)
 
 	prompt = (prompt or "").strip()
 	if not prompt:

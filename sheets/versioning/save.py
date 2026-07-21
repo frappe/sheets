@@ -29,6 +29,7 @@ import json
 
 import frappe
 
+from sheets.permissions import assert_can_write_sheet
 from sheets.sheets.doctype.sheet.storage import (
 	MAX_SHEETS_DATA_BYTES,
 	decode_sheets_data,
@@ -94,7 +95,8 @@ def _insert_new(
 def _update_existing(
 	name: str, title: str, encoded: str, byte_size: int, ops_list: list[dict]
 ) -> tuple[str, int]:
-	frappe.has_permission("Sheet", doc=name, ptype="write", throw=True)
+	# Honours the public-edit link alongside owner / shared-editor access.
+	assert_can_write_sheet(name)
 	head_seq = _append_ops_and_save(name, ops_list, byte_size, save_op_type="save")
 	frappe.db.set_value(
 		"Sheet",
@@ -136,7 +138,7 @@ def _append_ops_and_save(
 
 def append_op(sheet: str, op: dict) -> int:
 	"""Append a single ad-hoc op. Used outside the save path (e.g. realtime)."""
-	frappe.has_permission("Sheet", doc=sheet, ptype="write", throw=True)
+	assert_can_write_sheet(sheet)
 	new_seq = seq_mod.allocate(sheet)
 	frappe.get_doc(_op_doc(sheet, new_seq, op, frappe.session.user)).insert(
 		ignore_permissions=True

@@ -44,6 +44,11 @@ class CheckCollabAccess(unittest.TestCase):
 	def setUp(self):
 		self.frappe, patcher = _patched_frappe()
 		self.addCleanup(patcher.stop)
+		# Write access now flows through the shared helper (which folds in the
+		# public-edit link), so patch it rather than a second has_permission call.
+		cw = mock.patch("sheets.collab.can_write_sheet", return_value=True)
+		self.can_write = cw.start()
+		self.addCleanup(cw.stop)
 
 	def test_rejects_guest(self):
 		from sheets import collab
@@ -67,8 +72,9 @@ class CheckCollabAccess(unittest.TestCase):
 	def test_read_only_user_gets_view_grant(self):
 		from sheets import collab
 
-		# True for read, False for write.
-		self.frappe.has_permission.side_effect = [True, False]
+		# Read granted, but the write helper says no → viewer.
+		self.frappe.has_permission.return_value = True
+		self.can_write.return_value = False
 		out = collab.check_collab_access("SH-1")
 		self.assertTrue(out["canRead"])
 		self.assertFalse(out["canWrite"])
@@ -77,9 +83,24 @@ class CheckCollabAccess(unittest.TestCase):
 	def test_writer_gets_write_grant(self):
 		from sheets import collab
 
-		self.frappe.has_permission.side_effect = [True, True]
+		self.frappe.has_permission.return_value = True
+		self.can_write.return_value = True
 		out = collab.check_collab_access("SH-1")
 		self.assertTrue(out["canWrite"])
+
+	def test_public_viewer_without_share_gets_read(self):
+		from sheets import collab
+
+		# No direct read perm, but the sheet is public → still readable, so a
+		# public link user can join the live session (write stays helper-driven).
+		self.frappe.has_permission.return_value = False
+		# is_public lookup → truthy; the User identity lookup stays a string so
+		# `_user_identity` doesn't choke.
+		self.frappe.db.get_value.side_effect = lambda dt, *a, **k: 1 if dt == "Sheet" else ""
+		self.can_write.return_value = False
+		out = collab.check_collab_access("SH-1")
+		self.assertTrue(out["canRead"])
+		self.assertFalse(out["canWrite"])
 
 
 class CollabSecretGate(unittest.TestCase):

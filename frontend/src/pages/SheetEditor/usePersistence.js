@@ -14,12 +14,13 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
   // blank canvas. Shape: { kind: 'denied' | 'missing' | 'other', message }.
   const loadError = ref(null)
   // Access flags from get_sheet. `canWrite` drives the editor's read-only
-  // mode (false for guests and view-only viewers); `isPublic` powers the
-  // "Public" indicator + the share dialog's public-link toggle. Default
-  // canWrite=true so a brand-new ('new') sheet — which the owner is creating —
-  // is editable before its first load resolves.
+  // mode (false for guests and view-only viewers); `isPublic` / `isPublicWrite`
+  // power the "Public" indicator + the share dialog's public-link controls.
+  // Default canWrite=true so a brand-new ('new') sheet — which the owner is
+  // creating — is editable before its first load resolves.
   const canWrite = ref(true)
   const isPublic = ref(false)
+  const isPublicWrite = ref(false)
 
   async function loadSheet(name) {
     loadError.value = null
@@ -51,6 +52,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
       // A guest / view-only sharee gets can_write=false → editor renders read-only.
       canWrite.value = doc.can_write !== false
       isPublic.value = !!doc.is_public
+      isPublicWrite.value = !!doc.public_write
     } catch (err) {
       console.error('Load failed:', err)
       const t = err?.excType || ''
@@ -158,7 +160,13 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
         }
         try {
           const result = await call('sheets.api.save_sheet', args, { keepalive })
-          currentTitle.value = title
+          // Deliberately DON'T write `title` back into currentTitle here.
+          // `title` is a snapshot captured when this save was queued (up to
+          // the 2s debounce + network round-trip ago), and the server echoes
+          // nothing new — so assigning it back can only clobber keystrokes the
+          // user typed while the save was in flight and reset their caret to
+          // the end (the "jittery title" bug). currentTitle is already the
+          // local source of truth; leave it alone.
           // First success clears any sticky error from a previous failure.
           saveError.value = ''
           _lastSaveArgs   = null
@@ -181,5 +189,5 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
     }
   }
 
-  return { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave }
+  return { isSaving, saveError, canWrite, isPublic, isPublicWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave }
 }

@@ -22,6 +22,52 @@ import frappe
 _PRIVILEGED_ROLES = frozenset({"Administrator", "System Manager"})
 
 
+# ── Sheet write access (incl. the public-edit link) ───────────────────────────
+
+
+def can_write_sheet(name: str, user: str | None = None) -> bool:
+	"""Return whether ``user`` may write to sheet ``name``.
+
+	Write access comes from **either**:
+
+	  * the normal permission system — owner, a granting role, or an explicit
+	    per-user DocShare with ``write`` (``frappe.has_permission``); **or**
+	  * the *public write link* — when the owner enables ``public_write`` on a
+	    public sheet, any *signed-in* user with the link may edit it.
+
+	Guests (logged-out) are never granted write. They also can't reach the
+	write endpoints, which all require auth — public *reads* are the only
+	thing a guest gets.
+
+	This mirrors the deliberate ``is_public`` bypass used for public **reads**
+	in :func:`sheets.api.get_sheet`: public access is expressed as an explicit
+	flag on the Sheet, not a DocShare row, so it has to be checked explicitly.
+	A ``has_permission`` hook can't express it — Frappe controller hooks may
+	only *deny* access, never grant it.
+	"""
+	user = user or frappe.session.user
+	if frappe.has_permission("Sheet", doc=name, ptype="write", user=user, throw=False):
+		return True
+	if user == "Guest":
+		return False
+	access = frappe.db.get_value("Sheet", name, ["is_public", "public_write"], as_dict=True) or {}
+	return bool(access.get("is_public") and access.get("public_write"))
+
+
+def assert_can_write_sheet(name: str, user: str | None = None) -> None:
+	"""Throw ``PermissionError`` unless ``user`` can write to sheet ``name``.
+
+	The throwing counterpart to :func:`can_write_sheet`, used at every gate
+	that mutates a sheet's content so the public-edit link is honoured
+	uniformly (save, op log, realtime broadcast, rename, AI actions).
+	"""
+	if not can_write_sheet(name, user):
+		frappe.throw(
+			frappe._("No write access to sheet {0}").format(name),
+			frappe.PermissionError,
+		)
+
+
 # ── permission_query_conditions ──────────────────────────────────────────────
 
 

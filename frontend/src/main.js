@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
 import {
   Button, Dialog, Dialogs, FormControl, FeatherIcon, Spinner,
-  Dropdown, Popover, Tooltip, Avatar, Badge,
+  Dropdown, Popover, Tooltip, Avatar, Badge, Select,
   CommandPalette,
 } from 'frappe-ui'
 import { TooltipProvider, TooltipRoot } from 'reka-ui'
@@ -45,6 +45,7 @@ app.component('Popover', Popover)
 app.component('Tooltip', Tooltip)
 app.component('Avatar', Avatar)
 app.component('Badge', Badge)
+app.component('Select', Select)
 app.component('CommandPalette', CommandPalette)
 
 app.mount('#root')

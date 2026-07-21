@@ -76,6 +76,24 @@ function _stubs() {
         ])
       },
     }),
+    // frappe-ui Select (reka-ui based) is hard to drive in happy-dom, so we
+    // stub it to a flat list of option buttons. Clicking an option emits
+    // update:modelValue with the option's `value` — the same contract the
+    // real component honours — so the dialog's general-access and role
+    // handlers run exactly as they do in the app.
+    Select: defineComponent({
+      props: ['modelValue', 'options', 'size', 'disabled', 'placeholder'],
+      emits: ['update:modelValue'],
+      setup(props, { emit }) {
+        return () => h('div', { 'data-testid': 'select' },
+          (props.options || []).map(opt => h('button', {
+            'data-option': opt.label,
+            disabled: props.disabled,
+            onClick: () => emit('update:modelValue', opt.value),
+          }, opt.label)),
+        )
+      },
+    }),
     FormControl: defineComponent({
       props: ['modelValue', 'type', 'placeholder', 'autocomplete'],
       emits: ['update:modelValue'],
@@ -294,8 +312,10 @@ describe('ShareDialog — public link (general access)', () => {
     _mountDialog({ isPublic: false })
     await nextTick()
     await waitFor(() => screen.getByText('Members'))
-    expect(screen.getByText(/Only people added below/i)).toBeTruthy()
+    // Restricted has no explainer line and no view-only perms Select — both
+    // the public hint and the "Can view" perms option are absent.
     expect(screen.queryByText(/no sign-in required/i)).toBeNull()
+    expect(screen.queryByText('Can view')).toBeNull()
   })
 
   it('switching to "Anyone with the link" calls set_sheet_public and emits public-changed', async () => {
@@ -303,16 +323,17 @@ describe('ShareDialog — public link (general access)', () => {
     await nextTick()
     await waitFor(() => screen.getByText('Members'))
 
-    // The access dropdown stub renders each option as a button by label.
-    await fireEvent.click(screen.getByRole('button', { name: 'Anyone with the link' }))
+    // The access Select stub renders each option as a button by label.
+    await fireEvent.click(screen.getByRole('button', { name: 'Accessible to all' }))
 
     await waitFor(() => {
       const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
       expect(calls).toHaveLength(1)
-      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 1 })
+      // Defaults to view-only (write: 0) on first going public.
+      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 1, write: 0 })
     })
-    // Editor is notified so its topbar "Public" badge updates.
-    expect(emitted()['public-changed']?.[0]).toEqual([true])
+    // Editor is notified so its topbar "Public" badge + write gate update.
+    expect(emitted()['public-changed']?.[0]).toEqual([{ public: true, write: false }])
   })
 
   it('switching back to Restricted calls set_sheet_public with public: 0', async () => {
@@ -320,13 +341,54 @@ describe('ShareDialog — public link (general access)', () => {
     await nextTick()
     await waitFor(() => screen.getByText('Members'))
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Restricted' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Accessible to invited members' }))
 
     await waitFor(() => {
       const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
       expect(calls).toHaveLength(1)
-      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 0 })
+      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 0, write: 0 })
     })
-    expect(emitted()['public-changed']?.[0]).toEqual([false])
+    expect(emitted()['public-changed']?.[0]).toEqual([{ public: false, write: false }])
+  })
+
+  it('setting the public link to "Can edit" persists public + write and emits it', async () => {
+    // isPublic already on → the perms Select is visible with Can view / Can edit.
+    const { emitted } = _mountDialog({ isPublic: true, isPublicWrite: false })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+
+    // Only the public-perms Select renders "Can edit" here (no members, no
+    // staged chips), so this uniquely targets it.
+    await fireEvent.click(screen.getByRole('button', { name: 'Can edit' }))
+
+    await waitFor(() => {
+      const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ name: 'SH-1', public: 1, write: 1 })
+    })
+    expect(emitted()['public-changed']?.[0]).toEqual([{ public: true, write: true }])
+  })
+
+  it('re-enabling public after restricting does not re-grant a stale edit scope', async () => {
+    // Sheet starts public + editable, so publicPerms seeds to 'editor'.
+    const { emitted } = _mountDialog({ isPublic: true, isPublicWrite: true })
+    await nextTick()
+    await waitFor(() => screen.getByText('Members'))
+
+    // Restrict it (persists public:0, write:0).
+    await fireEvent.click(screen.getByRole('button', { name: 'Accessible to invited members' }))
+    await waitFor(() => {
+      const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
+      expect(calls.at(-1)[1]).toMatchObject({ public: 0, write: 0 })
+    })
+
+    // Re-enable public — must default to view-only, NOT silently re-grant the
+    // previous "editor" scope (guards the restricted→public race).
+    await fireEvent.click(screen.getByRole('button', { name: 'Accessible to all' }))
+    await waitFor(() => {
+      const calls = call.mock.calls.filter(([m]) => m === 'sheets.api.set_sheet_public')
+      expect(calls.at(-1)[1]).toMatchObject({ public: 1, write: 0 })
+    })
+    expect(emitted()['public-changed'].at(-1)[0]).toEqual({ public: true, write: false })
   })
 })

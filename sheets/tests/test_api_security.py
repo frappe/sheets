@@ -24,6 +24,15 @@ class _PermCheckBase(unittest.TestCase):
 		# `has_permission` returns True by default — endpoints proceed past
 		# the gate so we can also assert what they emit downstream.
 		self.frappe.has_permission.return_value = True
+		# Content-write endpoints now delegate to the shared helpers (which
+		# fold in the public-edit link). Patch them in the api namespace so
+		# the unit tests stay DB-free and can assert the delegation shape.
+		acw = mock.patch("sheets.api.assert_can_write_sheet")
+		self.assert_can_write = acw.start()
+		self.addCleanup(acw.stop)
+		cw = mock.patch("sheets.api.can_write_sheet", return_value=True)
+		self.can_write = cw.start()
+		self.addCleanup(cw.stop)
 
 
 class BroadcastsRequireWrite(_PermCheckBase):
@@ -31,25 +40,20 @@ class BroadcastsRequireWrite(_PermCheckBase):
 		from sheets import api
 
 		api.broadcast_op("SH-1", '{"op_type":"edit"}')
-		self.frappe.has_permission.assert_called_with(
-			"Sheet", doc="SH-1", ptype="write", throw=True
-		)
+		# Delegates to the shared write gate (which folds in the public-edit link).
+		self.assert_can_write.assert_called_once_with("SH-1")
 
 	def test_yjs_update_requires_write(self):
 		from sheets import api
 
 		api.yjs_relay("SH-1", "yjs_update", "<opaque>")
-		self.frappe.has_permission.assert_called_with(
-			"Sheet", doc="SH-1", ptype="write", throw=True
-		)
+		self.assert_can_write.assert_called_once_with("SH-1")
 
 	def test_yjs_state_requires_write(self):
 		from sheets import api
 
 		api.yjs_relay("SH-1", "yjs_state", "<opaque>")
-		self.frappe.has_permission.assert_called_with(
-			"Sheet", doc="SH-1", ptype="write", throw=True
-		)
+		self.assert_can_write.assert_called_once_with("SH-1")
 
 
 class PresenceStaysRead(_PermCheckBase):
@@ -69,9 +73,11 @@ class PresenceStaysRead(_PermCheckBase):
 	def test_yjs_awareness_is_read(self):
 		from sheets import api
 
+		# Read-side events probe read perm non-throwing (throw=False) so a
+		# public-link viewer can fall through to the is_public bypass.
 		api.yjs_relay("SH-1", "yjs_awareness", "<opaque>")
 		self.frappe.has_permission.assert_called_with(
-			"Sheet", doc="SH-1", ptype="read", throw=True
+			"Sheet", doc="SH-1", ptype="read", throw=False
 		)
 
 	def test_yjs_state_request_is_read(self):
@@ -79,7 +85,7 @@ class PresenceStaysRead(_PermCheckBase):
 
 		api.yjs_relay("SH-1", "yjs_state_request", "<opaque>")
 		self.frappe.has_permission.assert_called_with(
-			"Sheet", doc="SH-1", ptype="read", throw=True
+			"Sheet", doc="SH-1", ptype="read", throw=False
 		)
 
 
@@ -135,7 +141,7 @@ class GetSheetPublicGate(_PermCheckBase):
 		from sheets import api
 
 		# is_public falsy → the read gate must fire (throw=True).
-		self.frappe.db.get_value.return_value = 0
+		self.frappe.db.get_value.return_value = {"is_public": 0, "public_write": 0}
 		api.get_sheet("SH-1", compressed=1)
 		read_gate = [
 			c for c in self.frappe.has_permission.call_args_list
@@ -148,7 +154,7 @@ class GetSheetPublicGate(_PermCheckBase):
 		from sheets import api
 
 		# is_public truthy → no throwing read gate (anyone may read).
-		self.frappe.db.get_value.return_value = 1
+		self.frappe.db.get_value.return_value = {"is_public": 1, "public_write": 0}
 		out = api.get_sheet("SH-1", compressed=1)
 		threw = [
 			c for c in self.frappe.has_permission.call_args_list
@@ -161,18 +167,27 @@ class GetSheetPublicGate(_PermCheckBase):
 		from sheets import api
 
 		self.frappe.session.user = "Guest"
-		self.frappe.db.get_value.return_value = 1
+		self.frappe.db.get_value.return_value = {"is_public": 1, "public_write": 1}
 		out = api.get_sheet("SH-1", compressed=1)
-		# Guests never get write — and we don't even consult write perm.
+		# Guests never get write — even on a public_write sheet, and we
+		# short-circuit before consulting can_write_sheet at all.
 		self.assertFalse(out["can_write"])
+		self.can_write.assert_not_called()
 
 	def test_logged_in_writer_gets_can_write(self):
 		from sheets import api
 
-		self.frappe.db.get_value.return_value = 1
-		self.frappe.has_permission.return_value = True
+		self.frappe.db.get_value.return_value = {"is_public": 1, "public_write": 0}
+		self.can_write.return_value = True
 		out = api.get_sheet("SH-1", compressed=1)
 		self.assertTrue(out["can_write"])
+
+	def test_public_write_flag_is_returned(self):
+		from sheets import api
+
+		self.frappe.db.get_value.return_value = {"is_public": 1, "public_write": 1}
+		out = api.get_sheet("SH-1", compressed=1)
+		self.assertTrue(out["public_write"])
 
 
 class SetSheetPublicGated(_PermCheckBase):
@@ -189,9 +204,28 @@ class SetSheetPublicGated(_PermCheckBase):
 		from sheets import api
 
 		api.set_sheet_public("SH-1", public=1)
-		self.frappe.db.set_value.assert_called_with("Sheet", "SH-1", "is_public", 1)
+		self.frappe.db.set_value.assert_called_with(
+			"Sheet", "SH-1", {"is_public": 1, "public_write": 0}
+		)
 		api.set_sheet_public("SH-1", public=0)
-		self.frappe.db.set_value.assert_called_with("Sheet", "SH-1", "is_public", 0)
+		self.frappe.db.set_value.assert_called_with(
+			"Sheet", "SH-1", {"is_public": 0, "public_write": 0}
+		)
+
+	def test_public_write_requires_public(self):
+		from sheets import api
+
+		# write=1 with a public link → both flags on.
+		api.set_sheet_public("SH-1", public=1, write=1)
+		self.frappe.db.set_value.assert_called_with(
+			"Sheet", "SH-1", {"is_public": 1, "public_write": 1}
+		)
+		# write=1 but public off → public_write is forced back to 0. You
+		# can't have an editable link nobody can open.
+		api.set_sheet_public("SH-1", public=0, write=1)
+		self.frappe.db.set_value.assert_called_with(
+			"Sheet", "SH-1", {"is_public": 0, "public_write": 0}
+		)
 
 
 class UnshareSheetGated(_PermCheckBase):
@@ -213,10 +247,9 @@ class RenameSheetGated(_PermCheckBase):
 
 		self.frappe.get_doc.return_value = mock.Mock(name="SH-1")
 		api.rename_sheet("SH-1", "New title")
-		# Write perm must be the first thing checked.
-		first_call = self.frappe.has_permission.call_args_list[0]
-		self.assertEqual(first_call.kwargs.get("ptype"), "write")
-		self.assertEqual(first_call.kwargs.get("doc"), "SH-1")
+		# Rename is gated through the shared write helper (which honours the
+		# public-edit link), not a bare has_permission call.
+		self.assert_can_write.assert_called_once_with("SH-1")
 
 
 if __name__ == "__main__":

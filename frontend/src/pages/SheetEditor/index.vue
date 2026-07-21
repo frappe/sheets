@@ -42,16 +42,21 @@
             <path d="M73.6617 50.6653H63.1611V70.1439H73.6617V50.6653Z" fill="white"/>
           </svg>
         </button>
-        <input
-          name="sheet-title"
-          class="sn-title-input"
-          v-model="currentTitle"
-          :style="{ width: titleInputWidth }"
-          placeholder="Untitled Sheet"
-          spellcheck="false"
-          @focus="onTitleFocus"
-          @blur="onTitleBlur"
-        />
+        <!-- Auto-sizing title. A hidden ::after pseudo mirrors the text and
+             sizes the grid track, so the input grows via real DOM text layout —
+             pixel-perfect and smooth per keystroke, with no JS canvas measuring
+             and no width animation lagging behind the caret. -->
+        <span class="sn-title-fit" :data-value="currentTitle || 'Untitled Sheet'">
+          <input
+            name="sheet-title"
+            class="sn-title-input"
+            v-model="currentTitle"
+            placeholder="Untitled Sheet"
+            spellcheck="false"
+            @focus="onTitleFocus"
+            @blur="onTitleBlur"
+          />
+        </span>
         <!-- Save status — muted inline text; never competes with the title -->
         <span v-if="isSaving" class="sn-save-status">
           <FeatherIcon name="loader" class="sn-save-icon sn-save-spin" />
@@ -823,8 +828,9 @@
       :sheet-title="currentTitle"
       :owner-id="userEmail"
       :is-public="isPublic"
+      :is-public-write="isPublicWrite"
       @shares-changed="shareCount = $event"
-      @public-changed="isPublic = $event"
+      @public-changed="onPublicChanged"
     />
 
     <!-- AI Assist settings (in-app, never the desk form) -->
@@ -1976,26 +1982,6 @@ const hAlignIcon = computed(() => {
 })
 
 
-// Title input auto-sizes to content so the "Saved / Saving…" status sits
-// right next to the title text — no trailing whitespace. Canvas measurement
-// is exact (per-char estimates over-allocated and left visible empty space
-// between title and status). Lower bound is a clickable target for very
-// short titles; upper bound stops a runaway title from eating the topbar.
-let _titleMeasureCtx = null
-function _measureTitle(text) {
-  if (!_titleMeasureCtx) {
-    _titleMeasureCtx = document.createElement('canvas').getContext('2d')
-    _titleMeasureCtx.font = '600 15px InterVar, ui-sans-serif, system-ui, sans-serif'
-  }
-  return _titleMeasureCtx.measureText(text).width
-}
-const titleInputWidth = computed(() => {
-  const text = currentTitle.value || 'Untitled Sheet'
-  // +22 = 20px horizontal padding + 2px caret/safety
-  return Math.max(56, Math.min(520, _measureTitle(text) + 22)) + 'px'
-})
-
-
 // The logged-in user for the top-right avatar. Resolved from the
 // www/sheets.html shim when Sheets runs standalone, and from Frappe's login
 // cookies when it's embedded in the suite frontend (which never sets
@@ -2383,7 +2369,7 @@ const textWrapDropdownOptions = computed(() => [
 // fallbacks only cover the impossible window where someone saves before
 // useSheetTabs has finished initializing.
 let _sheetTabs = null
-const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
+const { isSaving, saveError, canWrite, isPublic, isPublicWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
     sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, slicers, pivot,
     charts, namedRanges,
@@ -2403,6 +2389,15 @@ const { isSaving, saveError, canWrite, isPublic, loadError, loadSheet, autoCreat
 // server's PermissionError on save).
 const isGuest  = computed(() => (window.frappe?.session?.user || 'Guest') === 'Guest')
 const readOnly = computed(() => !canWrite.value)
+
+// The share dialog reports public-access changes as { public, write } so the
+// topbar "Public" indicator and the public-link state stay in sync when the
+// owner flips the link (or its edit scope) from inside the dialog. `public`
+// is a reserved word, hence the rename.
+function onPublicChanged({ public: pub, write } = {}) {
+  isPublic.value = !!pub
+  isPublicWrite.value = !!write
+}
 
 _sheetTabs = useSheetTabs({ sheet, formats, extras: [merge, comments, validation, protection, condFormat, sortFilter, slicers], getGrid: () => grid, activeCell, formulaValue, refreshActiveFormat, onSwitch: () => {
     filterPanel.open = false     // close any open filter popover so it doesn't carry stale state
@@ -5711,7 +5706,7 @@ function toggleShowFormulas() {
 /* Left cluster groups: brand+title tight (gap:4); status chips sit further away
    (gap:12) so the title reads as the focal point, not crowded by badges. */
 .sn-topbar-left  { display:flex; align-items:center; gap:8px; min-width:0; }
-.sn-topbar-left  > .sn-app-icon-btn + .sn-title-input { margin-left:-8px; }
+.sn-topbar-left  > .sn-app-icon-btn + .sn-title-fit { margin-left:-8px; }
 .sn-topbar-right { display:flex; align-items:center; gap:6px; flex-shrink:0; }
 
 .sn-app-icon { width:28px; height:28px; flex-shrink:0; display:block; }
@@ -5723,7 +5718,26 @@ function toggleShowFormulas() {
 .sn-app-icon-btn:hover  { background:var(--surface-gray-2); }
 .sn-app-icon-btn:focus-visible { outline:2px solid var(--outline-gray-4); outline-offset:2px; }
 
-.sn-title-input { height:32px; border:1px solid transparent; border-radius:6px; padding:0 10px; font-size:15px; font-weight:600; color:var(--ink-gray-9); background:transparent; outline:none; font-family:inherit; letter-spacing:-.005em; transition:background-color .12s, border-color .12s, width .1s; }
+/* Auto-sizing title. A hidden ::after mirror carries the exact same typography
+   and box as the input; being normal flow, ITS width sizes the wrapper to the
+   real rendered text. The input is positioned absolutely on top so its own
+   intrinsic ~20ch width is taken out of the layout — otherwise it, not the
+   text, would dictate the box (the "unnecessarily big box"). Result: the box
+   hugs the text and grows smoothly per keystroke, with no width animation
+   lagging the caret and no canvas measurement drifting from actual metrics.
+   min/max-width keep the old click-target floor and runaway-title ceiling. */
+.sn-title-fit { position:relative; display:inline-block; min-width:56px; max-width:520px; }
+.sn-title-fit::after {
+  content:attr(data-value) ' ';
+  display:block;
+  visibility:hidden;
+  white-space:pre;
+  box-sizing:border-box;
+  height:32px; border:1px solid transparent; padding:0 10px;
+  max-width:520px; overflow:hidden;
+  font-size:15px; font-weight:600; font-family:inherit; letter-spacing:-.005em;
+}
+.sn-title-input { position:absolute; inset:0; box-sizing:border-box; width:100%; height:100%; border:1px solid transparent; border-radius:6px; padding:0 10px; font-size:15px; font-weight:600; color:var(--ink-gray-9); background:transparent; outline:none; font-family:inherit; letter-spacing:-.005em; transition:background-color .12s, border-color .12s; }
 
 .sn-title-input:hover { background:var(--surface-gray-2); }
 .sn-title-input:focus { border-color:var(--outline-gray-4); background:var(--surface-white); box-shadow:0 0 0 2px rgba(23,23,23,.10); }

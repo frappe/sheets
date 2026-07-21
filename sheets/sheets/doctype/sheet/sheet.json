@@ -12,7 +12,8 @@
   "trashed",
   "trashed_on",
   "trashed_by",
-  "is_public"
+  "is_public",
+  "public_write"
  ],
  "fields": [
   {
@@ -69,10 +70,18 @@
    "label": "Anyone with the link can view",
    "default": "0",
    "description": "When set, anyone with the link can open this sheet read-only — no login required."
+  },
+  {
+   "fieldname": "public_write",
+   "fieldtype": "Check",
+   "label": "Anyone with the link can edit",
+   "default": "0",
+   "depends_on": "is_public",
+   "description": "When set (and is_public is on), any signed-in user with the link can edit this sheet, not just view it. Guests remain view-only."
   }
  ],
  "links": [],
- "modified": "2026-05-19 14:39:41.599820",
+ "modified": "2026-07-21 00:00:00.000000",
  "modified_by": "asif@frappe.io",
  "module": "Sheets",
  "name": "Sheet",

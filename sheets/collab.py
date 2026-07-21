@@ -29,6 +29,8 @@ import hmac
 
 import frappe
 
+from sheets.permissions import can_write_sheet
+
 # Header the collab server sends with every server-to-server call.
 _COLLAB_SECRET_HEADER = "X-Collab-Secret"
 
@@ -53,12 +55,18 @@ def check_collab_access(name: str) -> dict:
 
 	can_read = bool(frappe.has_permission("Sheet", doc=name, ptype="read", throw=False))
 	if not can_read:
+		# Public sheets are readable by any signed-in user even without an
+		# explicit share — mirror `get_sheet`'s `is_public` bypass so public
+		# viewers/editors can join the live session, not just the static load.
+		can_read = bool(frappe.db.get_value("Sheet", name, "is_public"))
+	if not can_read:
 		# Don't 403 here — the collab server treats {canRead: False} as a
 		# clean refusal and closes the socket. Returning structured data
 		# is easier to surface to the client than parsing exception text.
 		return {"canRead": False, "canWrite": False}
 
-	can_write = bool(frappe.has_permission("Sheet", doc=name, ptype="write", throw=False))
+	# Folds in the public-edit link: a signed-in public editor gets write.
+	can_write = can_write_sheet(name)
 	user = frappe.session.user
 	identity = _user_identity(user)
 	return {
