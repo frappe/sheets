@@ -357,7 +357,9 @@ function onMemberRole(s, val) {
 }
 
 async function changeRole(s, write) {
-  if (s.write === write) return
+  // `write` is a boolean (from the role Select); normalise s.write too so the
+  // no-op guard is correct regardless of how the share row was shaped.
+  if (Boolean(s.write) === write) return
   const prev = s.write; s.write = write
   try {
     await call('sheets.api.share_sheet', {
