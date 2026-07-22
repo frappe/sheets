@@ -23,7 +23,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import frappe
-from frappe.utils import now_datetime
+from frappe.utils import get_datetime, now_datetime
 
 DEFAULT_RETENTION_DAYS = 30
 MIN_RETENTION_DAYS = 1
@@ -63,7 +63,17 @@ def purge_trashed_sheets() -> dict:
 		filters={"trashed": 1, "trashed_on": ["<", cutoff]},
 		pluck="name",
 	)
+	purged = 0
 	for name in expired:
+		# Re-check current state before erasing. The snapshot above is a moment
+		# in time; a restore — or a restore-then-retrash with a fresh timestamp —
+		# may have landed since. Never purge a sheet the user just recovered.
+		row = frappe.db.get_value("Sheet", name, ["trashed", "trashed_on"], as_dict=True)
+		if not row or not row.trashed or not row.trashed_on:
+			continue
+		if get_datetime(row.trashed_on) >= cutoff:
+			continue
 		hard_delete_sheet(name)
 		frappe.db.commit()
-	return {"purged": len(expired)}
+		purged += 1
+	return {"purged": purged}
