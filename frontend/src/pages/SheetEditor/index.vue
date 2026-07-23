@@ -1663,6 +1663,9 @@ const SHORTCUT_GROUPS = [
     { label: 'Jump to data-region edge',  combos: ['Mod+ArrowLeft'] },
     { label: 'Extend selection',          combos: ['Shift+ArrowRight'] },
     { label: 'Jump to start / end',       combos: ['Mod+Home', 'Mod+End'] },
+    { label: 'Scroll one screen',         combos: ['PageDown', 'PageUp'] },
+    { label: 'Select row / column',       combos: ['Shift+Space', 'Mod+Space'] },
+    { label: 'Select all',                combos: ['Mod+A', 'Mod+Shift+Space'] },
   ]},
   { title: 'Editing', items: [
     { label: 'Edit cell',                 combos: ['F2'] },
@@ -1673,6 +1676,9 @@ const SHORTCUT_GROUPS = [
     { label: 'Fill down / right',         combos: ['Mod+D', 'Mod+R'] },
     { label: 'Smart Fill from examples',  combos: ['Mod+E'] },
     { label: 'Cut / Copy / Paste',        combos: ['Mod+X', 'Mod+C', 'Mod+V'] },
+    { label: 'Paste values only',         combos: ['Mod+Shift+V'] },
+    { label: 'Insert rows / columns',     combos: ['Mod+Alt+='] },
+    { label: 'Delete rows / columns',     combos: ['Mod+Alt+-'] },
     { label: 'Undo / Redo',               combos: ['Mod+Z', 'Mod+Y'] },
     { label: 'Repeat last action',        combos: ['F4'] },
     { label: 'Add / edit comment',        combos: ['Shift+F2'] },
@@ -1682,6 +1688,9 @@ const SHORTCUT_GROUPS = [
     { label: 'Italic',                    combos: ['Mod+I'] },
     { label: 'Underline',                 combos: ['Mod+U'] },
     { label: 'Strikethrough',             combos: ['Mod+Shift+X'] },
+    { label: 'Number / percent',          combos: ['Mod+Shift+1', 'Mod+Shift+5'] },
+    { label: 'Time / date',               combos: ['Mod+Shift+2', 'Mod+Shift+3'] },
+    { label: 'Currency',                  combos: ['Mod+Shift+4'] },
   ]},
   { title: 'View / Tools', items: [
     { label: 'Command palette',           combos: ['Mod+K'] },
@@ -3957,6 +3966,27 @@ function fillRight() {
 // hide its Paste-Special entries without polling.
 const clipboardHas = ref(false)
 
+// Keyboard-driven insert/delete of rows or columns (Ctrl+Alt+= / Ctrl+Alt+-).
+// The context-menu handlers key off contextMenu.target{Row,Col}, which only a
+// right-click normally populates — so seed it from the live selection first. A
+// whole-column selection acts on columns; anything else acts on rows (matching
+// Google Sheets). The delete/insert span (N selected lines) flows from the
+// selection the same way the right-click menu computes it.
+function _insertRowsColsFromSelection() {
+  if (readOnly.value) return
+  const s = grid?.getSelection?.()
+  if (!s) return
+  if (s.mode === 'col') { contextMenu.targetCol = s.c0; doInsertCol(false, s.c1 - s.c0 + 1) }
+  else                  { contextMenu.targetRow = s.r0; doInsertRow(false, s.r1 - s.r0 + 1) }
+}
+function _deleteRowsColsFromSelection() {
+  if (readOnly.value) return
+  const s = grid?.getSelection?.()
+  if (!s) return
+  if (s.mode === 'col') { contextMenu.targetCol = s.c0; doDeleteCol() }
+  else                  { contextMenu.targetRow = s.r0; doDeleteRow() }
+}
+
 const { onGlobalKey } = useShortcuts({
   formulaInputEl:           () => formulaInputRef.value,
   undo, redo, onSave, toggleFmt, repeatLast, toggleShowFormulas,
@@ -3968,6 +3998,10 @@ const { onGlobalKey } = useShortcuts({
   clipboard, clipboardHas, setMarchingAnts: (v) => grid?.setMarchingAnts(v),
   fillDown, fillRight,
   runSmartFill,
+  insertRowsCols:    _insertRowsColsFromSelection,
+  deleteRowsCols:    _deleteRowsColsFromSelection,
+  applyNumberFormat: onNumberFormatChange,
+  pasteValues:       () => doPasteSpecial('values'),
   readOnly: () => readOnly.value,
 })
 

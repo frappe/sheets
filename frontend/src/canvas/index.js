@@ -169,11 +169,14 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
   // ── Selection ────────────────────────────────────────────────────────────────
 
   function getSelRange() {
-    return {
-      r0: Math.min(sel.r, selEnd.r), c0: Math.min(sel.c, selEnd.c),
-      r1: Math.max(sel.r, selEnd.r), c1: Math.max(sel.c, selEnd.c),
-      mode: selMode,
-    }
+    let r0 = Math.min(sel.r, selEnd.r), r1 = Math.max(sel.r, selEnd.r)
+    let c0 = Math.min(sel.c, selEnd.c), c1 = Math.max(sel.c, selEnd.c)
+    // Whole-row / column / sheet selections keep their anchor on the user's
+    // active cell — selMode, not the stored corners, defines the perpendicular
+    // span. So a Shift+Space row still reports every column for copy/delete/etc.
+    if (selMode === 'row' || selMode === 'all') { c0 = 0; c1 = TOTAL_COLS - 1 }
+    if (selMode === 'col' || selMode === 'all') { r0 = 0; r1 = TOTAL_ROWS - 1 }
+    return { r0, c0, r1, c1, mode: selMode }
   }
 
   // Restore a rectangular selection (used by the contextmenu handler when
@@ -1613,6 +1616,48 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
         for (const { id } of cells) delete data[id]
         render()
       }
+      return
+    }
+
+    // Shift+Space — select whole row(s); Ctrl/Cmd+Space — whole column(s);
+    // Ctrl/Cmd+Shift+Space — the entire sheet. Mirrors Google Sheets. Kept
+    // above the printable-char handler below so the Space keystroke isn't
+    // swallowed into cell-edit mode. The anchor stays on the active cell
+    // (r, c) — getSelRange() expands the perpendicular axis by selMode — so the
+    // highlighted cell keeps its column/row and arrows + typing resume from
+    // there, exactly like Sheets. A pre-existing range promotes its span.
+    if (e.code === 'Space' || e.key === ' ') {
+      if (mod && e.shiftKey) {
+        e.preventDefault()
+        selMode = 'all'; sel = { r: 0, c: 0 }; selEnd = { r: TOTAL_ROWS - 1, c: TOTAL_COLS - 1 }
+        render(); onSelect?.('A1'); return
+      }
+      if (mod) {
+        e.preventDefault()
+        selMode = 'col'; sel = { r, c }; selEnd = { r, c: ec }
+        const cc0 = Math.min(c, ec), cc1 = Math.max(c, ec)
+        render(); onSelect?.(colLabel(cc0) + ':' + colLabel(cc1)); return
+      }
+      if (e.shiftKey) {
+        e.preventDefault()
+        selMode = 'row'; sel = { r, c }; selEnd = { r: er, c }
+        const rr0 = Math.min(r, er), rr1 = Math.max(r, er)
+        render(); onSelect?.(String(rr0 + 1) + ':' + String(rr1 + 1)); return
+      }
+    }
+
+    // PageDown / PageUp — move the active cell one screenful down / up; Shift
+    // extends the selection instead. Page size is the count of rows currently
+    // visible in the viewport, so it tracks zoom and row heights.
+    if (e.key === 'PageDown' || e.key === 'PageUp') {
+      e.preventDefault()
+      _tabAnchorCol = null
+      const top  = geo.firstVisRow()
+      const page = Math.max(1, geo.lastVisRow(top, cssH) - top)
+      const dir  = e.key === 'PageDown' ? 1 : -1
+      const from = e.shiftKey ? er : r
+      const target = _skipHiddenR(from + dir * page, dir)
+      if (e.shiftKey) extendSel(target, ec); else moveSel(target, c)
       return
     }
 
