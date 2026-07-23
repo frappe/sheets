@@ -640,8 +640,13 @@
     <!-- Bottom · sheet tabs + selection stats -->
     <div class="sn-bottom">
       <!-- Pinned outside the scroll track so it stays reachable no matter
-           how many tabs there are. -->
-      <Button variant="ghost" size="sm" icon="plus" class="sn-tab-add" tooltip="Add sheet" :disabled="readOnly" @click="addSheet" />
+           how many tabs there are. The wrapper owns the divider + margins so
+           the Button itself stays a clean square pill (frappe-ui puts our
+           `class` on the <button> root, so any spacing/border set on it would
+           become part of the button's own hover box). -->
+      <div class="sn-tab-add-wrap">
+        <Button variant="ghost" size="sm" icon="plus" class="sn-tab-add" tooltip="Add sheet" :disabled="readOnly" @click="addSheet" />
+      </div>
       <div class="sn-tabs-track">
         <div
           v-for="name in sheetNames"
@@ -6190,19 +6195,24 @@ function toggleShowFormulas() {
 }
 .sn-tab--pivot.sn-tab--active::after { background:var(--ink-cyan-7, #0e7490); }
 
-/* Main label Button — transparent so the wrapper's pill shows through.
-   No internal hover/active background; that lives on `.sn-tab` itself. */
-.sn-tab-btn { max-width:148px; }
-.sn-tab-btn :deep(button) {
+/* Main label Button — transparent so the wrapper's pill shows through, with
+   no internal hover/active background of its own; that lives on `.sn-tab`.
+   frappe-ui forwards our `class` onto the <button> root itself (there is no
+   inner button), so we style `.sn-tab-btn` directly — a `:deep(button)`
+   descendant selector matches nothing and leaves the native ghost hover pill
+   showing through, which is what made the label and chevron highlight as two
+   separate pills. `background` is forced so it beats the native
+   `hover:/active:` background utilities at equal specificity. */
+.sn-tab-btn {
   font-size:12px; font-weight:400; color:var(--ink-gray-7);
   /* Tight right padding so the label flows directly into the chevron and
      the pair reads as one pill on every tab. */
-  padding:0 2px 0 8px; height:28px;
+  padding:0 2px 0 8px !important; height:28px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-  max-width:148px; border-radius:0;
+  max-width:148px; border-radius:0 !important;
   background:transparent !important;
 }
-.sn-tab--active .sn-tab-btn :deep(button) { font-weight:600; color:var(--ink-gray-9); }
+.sn-tab--active .sn-tab-btn { font-weight:600; color:var(--ink-gray-9); }
 
 /* Pivot icon tint */
 .sn-tab--pivot .sn-tab-btn :deep(.icon) { color:var(--ink-cyan-7, #0e7490); }
@@ -6226,27 +6236,33 @@ function toggleShowFormulas() {
   margin-left:2px; line-height:1;
 }
 
-/* Chevron — sits flush against the label inside the same pill so the two
-   read as one button. Slightly muted on inactive tabs, full ink on the
-   active one (matches the label's color shift). */
-.sn-tab-chevron :deep(button) {
-  padding:0 6px 0 0;
+/* Chevron — sits flush against the label inside the same pill so the two read
+   as one button. Styled directly on the <button> (same reason as `.sn-tab-btn`
+   above), transparent so it shares the wrapper's pill instead of drawing its
+   own. `width:auto` overrides frappe-ui's fixed-square `w-7` so the chevron
+   hugs the label rather than reserving a full 28px cell. Slightly muted on
+   inactive tabs, full ink on the active one (matches the label's color). */
+.sn-tab-chevron {
+  padding:0 6px 0 0 !important;
+  width:auto !important;
   height:28px;
-  border-radius:0;
+  border-radius:0 !important;
   background:transparent !important;
   color:var(--ink-gray-5);
 }
-.sn-tab-chevron :deep(button:hover) { color:var(--ink-gray-9); }
-.sn-tab--active .sn-tab-chevron :deep(button) { color:var(--ink-gray-8); }
+.sn-tab-chevron:hover { color:var(--ink-gray-9); }
+.sn-tab--active .sn-tab-chevron { color:var(--ink-gray-8); }
 
-/* Add-sheet button — pin its inner Button to the same 28px height as the
-   tab labels and center within the track so the `+` sits on the same row
-   axis as the tab text, not floating a couple of pixels above. */
-/* Pinned at the start of the bottom bar (outside the scroll track) so it's
-   always reachable regardless of how many tabs there are. Full-height flex
-   box keeps the 28px button optically centered against the tab labels. */
-.sn-tab-add { flex-shrink:0; display:flex; align-items:center; align-self:center; margin:0 8px 0 12px; padding-right:8px; border-right:1px solid var(--outline-gray-2); }
-.sn-tab-add :deep(button) { height:28px; width:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; }
+/* Add-sheet button — the wrapper carries the divider + margins so the Button
+   itself stays a clean square pill with its own contained hover box (any
+   border/padding set on `.sn-tab-add` would land on the <button> root and
+   distend its hover fill). Full-height flex box keeps the 28px button
+   optically centered against the tab labels. */
+.sn-tab-add-wrap {
+  flex-shrink:0; display:flex; align-items:center; align-self:center;
+  margin:0 8px 0 12px; padding-right:8px;
+  border-right:1px solid var(--outline-gray-2);
+}
 /* Feather `plus` sits ~1px high inside its box; pull the glyph down so it
    lands on the same optical row as the tab labels' text. */
 .sn-tab-add :deep(svg) { display:block; position:relative; top:1px; }

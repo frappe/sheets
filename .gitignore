@@ -65,3 +65,6 @@ frontend/e2e/.auth/
 
 # Claude Code workspace settings (per-machine, not for distribution)
 .claude/
+
+# Playwright MCP QA artifacts
+.playwright-mcp/
