@@ -496,19 +496,25 @@ async function copyLink() {
 /* ── Type scale ──────────────────────────────────────────────────────────────
    The whole dialog speaks three text styles, differentiated by weight + colour
    rather than a spread of pixel sizes (this was the founder's "so many different
-   font styles" note). Matches Frappe Writer / Drive's share dialog. */
+   font styles" note). The metrics mirror frappe-ui's own text tokens exactly —
+   line-height 1.15, letter-spacing 0.02em, regular weight 420 (InterVar) — so
+   this text tracks identically to the Dialog title, Selects and Buttons around
+   it (frappe-ui beta.3 has no compound `text-*-medium` class to reuse, and
+   `text-base` + `font-medium` utilities fight over weight, so we set it here). */
 .sd-section-label {                 /* "General Access", "Members" */
-  font-size: 13px; font-weight: 500; color: var(--ink-gray-5);
-  margin: 0 0 12px;
+  font-size: 13px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.15;
+  color: var(--ink-gray-5); margin: 0 0 12px;
 }
 .sd-primary-text {                  /* people's names */
-  font-size: 14px; font-weight: 500; color: var(--ink-gray-8);
+  font-size: 14px; font-weight: 500; letter-spacing: 0.02em; line-height: 1.15;
+  color: var(--ink-gray-8);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sd-secondary-text,                 /* emails */
 .sd-hint,                           /* public-access explainer line */
 .sd-role-static {                   /* "Owner (you)" */
-  font-size: 13px; font-weight: 400; color: var(--ink-gray-6);
+  font-size: 13px; font-weight: 420; letter-spacing: 0.02em; line-height: 1.15;
+  color: var(--ink-gray-6);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sd-hint { white-space: normal; color: var(--ink-gray-5); margin: 8px 0 0; line-height: 1.5; }
@@ -543,7 +549,7 @@ async function copyLink() {
 .sd-stage-input {
   flex: 1; min-width: 80px;
   border: 0; background: transparent;
-  font-size: 13px; color: var(--ink-gray-9);
+  font-size: 13px; letter-spacing: 0.02em; color: var(--ink-gray-9);
   padding: 2px 4px;
 }
 /* Belt-and-braces: some global styles (frappe-ui, browser default) add a
@@ -560,7 +566,7 @@ async function copyLink() {
   border: 1px solid var(--outline-gray-2);
   border-radius: 999px;
   padding: 2px 6px 2px 4px;
-  font-size: 13px; color: var(--ink-gray-8);
+  font-size: 13px; letter-spacing: 0.02em; color: var(--ink-gray-8);
   max-width: 240px;
 }
 .sd-chip-text {
