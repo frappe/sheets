@@ -349,16 +349,20 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		const anch = parseCellId(anchorId)
 		if (!anch) return false
 		const { srcRows, srcCols, tileable } = _gridGeometry(grid, anch, destSel)
+		const sn = sheet.getCurrentSheet()
 
 		// Build the cell map first, then ship one bulk write — same reason as
 		// paste() above. Big external pastes (Excel/CSV via system clipboard)
 		// were the worst case here.
 		const writes = {}
-		const linkAt = {}   // destination id → hyperlink url
+		const linkAt = {}   // destination id → hyperlink url (null = clear)
 		const place = (id, val, dr, dc) => {
 			writes[id] = val
 			const url = links?.[`${dr},${dc}`] ?? detectHyperlink(val)
+			// A URL links the cell; otherwise clear any link the destination
+			// already carried so pasted plain text can't inherit a stale target.
 			if (url) linkAt[id] = url
+			else if (formats?.get(id, sn)?.hyperlink) linkAt[id] = null
 		}
 		if (tileable) {
 			for (let r = destSel.r0; r <= destSel.r1; r++) {
@@ -374,7 +378,6 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 					place(colLabel(anch.col + dc) + (anch.row + dr + 1), val, dr, dc)
 				}))
 		}
-		const sn = sheet.getCurrentSheet()
 		if (protection && Object.keys(writes).some(id => {
 			const p = parseCellId(id); return p && protection.isProtected(p.row, p.col, sn)
 		})) {

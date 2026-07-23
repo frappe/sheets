@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 import frappe
-from sheets.link_preview import _assert_public_http_url
+from sheets.link_preview import _validate_and_resolve
 
 
 def _addrinfo(*ips):
@@ -18,12 +18,12 @@ def _addrinfo(*ips):
 class AssertPublicHttpUrl(unittest.TestCase):
 	def _allow(self, url, resolves_to="93.184.216.34"):
 		with mock.patch("sheets.link_preview.socket.getaddrinfo", return_value=_addrinfo(resolves_to)):
-			_assert_public_http_url(url)  # must not raise
+			_validate_and_resolve(url)  # must not raise
 
 	def _block(self, url, resolves_to="93.184.216.34"):
 		with mock.patch("sheets.link_preview.socket.getaddrinfo", return_value=_addrinfo(resolves_to)):
 			with self.assertRaises(frappe.ValidationError):
-				_assert_public_http_url(url)
+				_validate_and_resolve(url)
 
 	def test_public_https_url_passes(self):
 		self._allow("https://frappe.io/")
@@ -55,11 +55,11 @@ class AssertPublicHttpUrl(unittest.TestCase):
 			return_value=_addrinfo("93.184.216.34", "127.0.0.1"),
 		):
 			with self.assertRaises(frappe.ValidationError):
-				_assert_public_http_url("https://tricky.example.com/")
+				_validate_and_resolve("https://tricky.example.com/")
 
 	def test_unresolvable_host_blocked(self):
 		import socket as _socket
 
 		with mock.patch("sheets.link_preview.socket.getaddrinfo", side_effect=_socket.gaierror):
 			with self.assertRaises(frappe.ValidationError):
-				_assert_public_http_url("https://no-such-host.invalid/")
+				_validate_and_resolve("https://no-such-host.invalid/")

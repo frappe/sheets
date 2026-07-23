@@ -4,24 +4,22 @@
 # The browser can't fetch a foreign page's HTML (CORS), so the server does it.
 # That makes this endpoint an SSRF vector by construction, so every fetch:
 #   * allows only http/https on default ports,
-#   * resolves the hostname and refuses private / loopback / link-local /
-#     reserved address space (re-checked on every redirect hop),
+#   * resolves the hostname, refuses private / loopback / link-local / reserved
+#     address space, and then CONNECTS TO THAT EXACT IP — the Host header, TLS
+#     SNI, and cert hostname stay the original name, so the address we validated
+#     is the address we talk to. A rebinding nameserver can't hand a public IP
+#     to the check and a private one to the connection (re-done per redirect).
 #   * follows at most MAX_REDIRECTS redirects, manually,
 #   * reads at most MAX_BYTES with a short timeout, HTML content types only.
 # Results (including failures) are cached in Redis so hover traffic doesn't
 # hammer external sites.
-#
-# Known limitation: the guard resolves DNS, then requests re-resolves for the
-# actual fetch — a racing rebinding nameserver could slip a private IP between
-# the two. Closing that needs IP-pinned transport (custom adapter + SNI);
-# accepted for now since the endpoint is auth-only, rate-limited, and the
-# response is only ever parsed as HTML metadata.
 
 import ipaddress
 import socket
 from urllib.parse import urljoin, urlparse
 
-import requests
+import certifi
+import urllib3
 from bs4 import BeautifulSoup
 
 import frappe
@@ -29,7 +27,9 @@ from frappe.rate_limiter import rate_limit
 
 MAX_REDIRECTS = 3
 MAX_BYTES = 100 * 1024
-TIMEOUT = (3, 4)  # (connect, read) seconds
+CONNECT_TIMEOUT = 3
+READ_TIMEOUT = 4
+REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 CACHE_OK_SEC = 24 * 60 * 60
 CACHE_ERR_SEC = 5 * 60
 USER_AGENT = "Mozilla/5.0 (compatible; FrappeSheets-LinkPreview/1.0)"
@@ -61,6 +61,7 @@ def get_link_preview(url: str) -> dict:
 
 def _fetch_preview(url: str) -> dict:
 	final_url, html = _fetch_html(url)
+	# Hand raw bytes to BeautifulSoup so it detects the page's charset itself.
 	soup = BeautifulSoup(html, "html.parser")
 
 	title = _first(
@@ -84,37 +85,59 @@ def _fetch_preview(url: str) -> dict:
 	}
 
 
-def _fetch_html(url: str) -> tuple[str, str]:
+def _fetch_html(url: str) -> tuple[str, bytes]:
 	"""GET `url` with SSRF guards; returns (final_url, first MAX_BYTES of body)."""
 	current = url
 	for _ in range(MAX_REDIRECTS + 1):
-		_assert_public_http_url(current)
-		resp = requests.get(
-			current,
-			timeout=TIMEOUT,
-			stream=True,
-			allow_redirects=False,
-			headers={"User-Agent": USER_AGENT, "Accept": "text/html"},
-		)
+		ip, host, port, scheme, path = _validate_and_resolve(current)
+		pool = _pinned_pool(ip, host, port, scheme)
 		try:
-			if resp.is_redirect or resp.is_permanent_redirect:
+			resp = pool.urlopen(
+				"GET",
+				path,
+				headers={"Host": host, "User-Agent": USER_AGENT, "Accept": "text/html"},
+				redirect=False,
+				preload_content=False,
+				decode_content=True,
+			)
+			if resp.status in REDIRECT_STATUSES:
 				location = resp.headers.get("location")
 				if not location:
 					raise frappe.ValidationError("Redirect without location")
 				current = urljoin(current, location)
 				continue
-			resp.raise_for_status()
-			ctype = resp.headers.get("content-type", "")
-			if "html" not in ctype:
+			if resp.status >= 400:
+				raise frappe.ValidationError(f"HTTP {resp.status}")
+			if "html" not in resp.headers.get("content-type", ""):
 				raise frappe.ValidationError("Not an HTML page")
-			body = resp.raw.read(MAX_BYTES, decode_content=True)
-			return current, body.decode(resp.encoding or "utf-8", errors="replace")
+			return current, resp.read(MAX_BYTES)
 		finally:
-			resp.close()
+			pool.close()
 	raise frappe.ValidationError("Too many redirects")
 
 
-def _assert_public_http_url(url: str) -> None:
+def _pinned_pool(ip: str, host: str, port: int, scheme: str):
+	"""Connection pool bound to the pre-validated IP, but presenting the original
+	hostname for Host header, TLS SNI, and cert verification."""
+	timeout = urllib3.Timeout(connect=CONNECT_TIMEOUT, read=READ_TIMEOUT)
+	if scheme == "https":
+		return urllib3.HTTPSConnectionPool(
+			ip,
+			port=port,
+			maxsize=1,
+			retries=False,
+			timeout=timeout,
+			cert_reqs="CERT_REQUIRED",
+			ca_certs=certifi.where(),
+			server_hostname=host,
+			assert_hostname=host,
+		)
+	return urllib3.HTTPConnectionPool(ip, port=port, maxsize=1, retries=False, timeout=timeout)
+
+
+def _validate_and_resolve(url: str) -> tuple[str, str, int, str, str]:
+	"""Resolve `url`'s host, reject non-public targets, and return the exact IP to
+	connect to plus (host, port, scheme, path+query)."""
 	parsed = urlparse(url)
 	if parsed.scheme not in ("http", "https"):
 		raise frappe.ValidationError("Only http/https URLs allowed")
@@ -123,17 +146,18 @@ def _assert_public_http_url(url: str) -> None:
 	host = parsed.hostname
 	if not host:
 		raise frappe.ValidationError("Invalid URL")
-	# Resolve every A/AAAA record — a public name pointing at 127.0.0.1 or
-	# 10.x (DNS-based SSRF) is refused, not just literal private IPs. The
-	# explicit port + SOCK_STREAM matter: macOS getaddrinfo(host, None) fails
-	# with EAI_NONAME inside threaded web workers.
 	port = parsed.port or (443 if parsed.scheme == "https" else 80)
+	# Resolve every A/AAAA record and reject if ANY is non-public — a rebinding
+	# nameserver can rotate which record it hands out, so one bad answer taints
+	# the name. We then connect to the first (validated) IP directly.
 	try:
 		infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
 	except socket.gaierror:
 		raise frappe.ValidationError("Host not resolvable")
+	pinned_ip = None
 	for info in infos:
-		addr = ipaddress.ip_address(info[4][0])
+		ip = info[4][0]
+		addr = ipaddress.ip_address(ip)
 		if (
 			addr.is_private
 			or addr.is_loopback
@@ -143,6 +167,10 @@ def _assert_public_http_url(url: str) -> None:
 			or addr.is_unspecified
 		):
 			raise frappe.ValidationError("Address not allowed")
+		if pinned_ip is None:
+			pinned_ip = ip
+	path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+	return pinned_ip, host, port, parsed.scheme, path
 
 
 def _meta(soup, **attrs):

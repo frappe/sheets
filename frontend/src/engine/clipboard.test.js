@@ -233,4 +233,16 @@ describe('clipboard — pasteFromText auto-links whole-cell URLs', () => {
     const bare = createClipboard({ sheet: makeSheet() })
     expect(bare.pasteFromText('https://frappe.io/', 'A1', null)).toBe(true)
   })
+
+  it('clears a stale hyperlink when plain text overwrites a linked cell', () => {
+    formats.set('A1', { hyperlink: 'https://old.example.com' })
+    cb.pasteFromText('just text', 'A1', null)
+    expect(sheet._store().A1).toBe('just text')
+    expect(formats._store().A1).toEqual({ hyperlink: null })
+  })
+
+  it('leaves formats untouched when plain text lands on an unlinked cell', () => {
+    cb.pasteFromText('plain', 'A1', null)
+    expect(formats._store().A1).toBeUndefined()
+  })
 })
