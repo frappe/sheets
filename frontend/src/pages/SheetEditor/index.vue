@@ -1033,28 +1033,10 @@
       </template>
     </Dialog>
 
-    <!-- Keyboard shortcut help — generated from frappe-ui's shortcut registry
-         (see useShortcuts.js), so it can never drift from the handlers. Read via
-         getActiveShortcuts() off the same 'frappe-ui' import that registers them,
-         so both share one registry instance. -->
-    <Dialog v-model="showShortcutsHelp" :options="{ title: 'Keyboard shortcuts', size: 'xl' }">
-      <template #body-content>
-        <div class="sn-help-grid">
-          <div v-for="(items, group) in shortcutGroups" :key="group" class="sn-help-group">
-            <div class="sn-help-title">{{ group }}</div>
-            <div v-for="s in items" :key="s.id.toString()" class="sn-help-row">
-              <span class="sn-help-label">{{ s.description }}</span>
-              <span class="sn-help-keys">
-                <template v-for="(k, i) in s.keys" :key="k">
-                  <KeyboardShortcut :combo="shortcutCombo(s, k)" />
-                  <span v-if="i < s.keys.length - 1" class="sn-help-or">or</span>
-                </template>
-              </span>
-            </div>
-          </div>
-        </div>
-      </template>
-    </Dialog>
+    <!-- Keyboard shortcut help — frappe-ui's KeyboardShortcutsModal, generated
+         from the shortcut registry populated by useShortcuts.js (via useShortcut),
+         so it can never drift from the handlers. -->
+    <KeyboardShortcutsModal v-model:open="showShortcutsHelp" title="Keyboard shortcuts" />
 
     <!-- Slicers — floating value-filter controls bound to a filter column -->
     <div v-for="sl in activeSlicers" :key="sl.id" class="sn-slicer"
@@ -1312,7 +1294,7 @@ import { getFunctionNames }    from '../../engine/formula.js'
 import NamedRangesDialog       from './NamedRangesDialog.vue'
 import { useSmartFill }        from './useSmartFill.js'
 import * as versionsApi        from '../../services/versions.js'
-import { Checkbox, KeyboardShortcut, TextInput, Tooltip, getActiveShortcuts } from 'frappe-ui'
+import { Checkbox, KeyboardShortcut, KeyboardShortcutsModal, TextInput, Tooltip } from 'frappe-ui'
 
 const props = defineProps({ id: { type: String, default: 'new' } })
 const emit  = defineEmits(['close', 'saved'])
@@ -1655,26 +1637,6 @@ const hyperlinkText        = ref('')
 const hyperlinkUrl         = ref('')
 const hasActiveHyperlink   = computed(() => !!activeFormat.value?.hyperlink)
 const showFormulas      = ref(false)
-
-// Keyboard-shortcut help is generated from frappe-ui's live shortcut registry
-// (populated by useShortcuts.js via useShortcut). Grouped by each shortcut's
-// `group`; read-only-gated shortcuts drop out automatically (getActiveShortcuts
-// filters by their condition).
-const activeShortcuts = getActiveShortcuts()
-const shortcutGroups = computed(() => {
-  const groups = {}
-  for (const s of activeShortcuts.value) (groups[s.group] ??= []).push(s)
-  return groups
-})
-// Build a KeyboardShortcut `combo` string ("Mod+Shift+K") from a registry entry.
-function shortcutCombo(s, key) {
-  const parts = []
-  if (s.ctrl) parts.push('Mod')
-  if (s.shift) parts.push('Shift')
-  if (s.alt) parts.push('Alt')
-  parts.push(key)
-  return parts.join('+')
-}
 
 const selectionStats    = ref(null)
 const isDirty           = ref(false)
@@ -3337,6 +3299,12 @@ function _setupEventListeners() {
   document.addEventListener('copy',      onDocCopy)
   document.addEventListener('cut',       onDocCut)
   document.addEventListener('mousedown', _onDocMouseDown)
+  // Re-arm the grid for paste when the user switches back to this window
+  // (copied from another app) or back to this tab, so Cmd+V works without a
+  // priming click. 'focus' covers app/window switches; 'visibilitychange'
+  // covers tab switches within the same window.
+  window.addEventListener('focus',              _refocusGridIfIdle)
+  document.addEventListener('visibilitychange', _refocusGridIfIdle)
 }
 
 async function _loadInitialData() {
@@ -3398,6 +3366,9 @@ onMounted(async () => {
   } finally {
     isInitialLoad.value = false
   }
+  // Focus the grid on open so arrow-key nav and Cmd+V work immediately, without
+  // a priming click. Idle-guarded so a load that opened a dialog keeps its focus.
+  _refocusGridIfIdle()
 })
 
 onBeforeUnmount(() => {
@@ -3418,6 +3389,8 @@ onBeforeUnmount(() => {
   document.removeEventListener('copy',      onDocCopy)
   document.removeEventListener('cut',       onDocCut)
   document.removeEventListener('mousedown', _onDocMouseDown)
+  window.removeEventListener('focus',              _refocusGridIfIdle)
+  document.removeEventListener('visibilitychange', _refocusGridIfIdle)
 })
 
 // ── Save ──────────────────────────────────────────────────────────────────────
@@ -3982,6 +3955,19 @@ const { onGlobalKey } = useShortcuts({
 function _canvasActive() {
   const ae = document.activeElement
   return ae === canvasRef.value || ae === formulaInputRef.value || gridWrapRef.value?.contains(ae)
+}
+
+// Returning to the tab or the sheet route leaves browser focus on <body>, not
+// the grid, so a Cmd+V fires a paste event the canvas never receives (onDocPaste
+// bails at the _canvasActive guard) — the "I have to click a cell first before
+// paste works" report. Pull focus back to the canvas, but ONLY when focus has
+// landed on nothing (body/null); never steal it from the formula bar, an inline
+// cell editor, or an open dialog.
+function _refocusGridIfIdle() {
+  if (document.visibilityState === 'hidden') return
+  const ae = document.activeElement
+  if (ae && ae !== document.body) return
+  canvasRef.value?.focus()
 }
 
 function onDocCopy(e) {
@@ -6292,20 +6278,6 @@ function toggleShowFormulas() {
 .sn-ctx-menu :deep(button) { width:100%; justify-content:flex-start; padding-left:10px; padding-right:10px; }
 .sn-ctx-sep { height:1px; background:var(--outline-gray-1); margin:4px 0; border:none; }
 .sn-rename-err { margin:6px 0 0; font-size:12px; color:var(--ink-red-3); letter-spacing:.02em; }
-
-/* Keyboard-shortcut help dialog — two-column grid of grouped Espresso list rows. */
-.sn-help-grid    { display:grid; grid-template-columns:1fr 1fr; gap:20px 28px; }
-.sn-help-group   { display:flex; flex-direction:column; gap:2px; }
-.sn-help-title   { font-size:11px; font-weight:600; letter-spacing:.06em; color:var(--ink-gray-5); text-transform:uppercase; padding:0 4px; margin-bottom:6px; }
-.sn-help-row     { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 8px; border-radius:6px; }
-.sn-help-row:hover { background:var(--surface-gray-2); }
-.sn-help-label   { font-size:13px; letter-spacing:.02em; color:var(--ink-gray-9); }
-.sn-help-keys    { display:inline-flex; align-items:center; gap:6px; color:var(--ink-gray-7); }
-.sn-help-keys :deep(> div) {
-  padding:2px 6px; border:1px solid var(--outline-gray-2); border-radius:4px;
-  background:var(--surface-white); color:var(--ink-gray-8); min-height:20px;
-}
-.sn-help-or      { font-size:11px; letter-spacing:.02em; color:var(--ink-gray-5); }
 
 /* Sheet-tab drag visual — Espresso ink-gray-9 left edge on the drop target. */
 .sn-tab               { cursor:grab; }
