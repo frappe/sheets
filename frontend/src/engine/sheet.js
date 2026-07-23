@@ -319,8 +319,13 @@ export function createSheet({ onCellChanged, onCellsChanged } = {}) {
 
 	function renameSheet(oldName, newName) {
 		if (!sheets[oldName] || sheets[newName] || oldName === newName) return false
-		sheets[newName] = sheets[oldName]
-		delete sheets[oldName]
+		// Rename in place: rebuild the dict in the same key order, swapping
+		// newName into oldName's slot. A naive `sheets[newName] = sheets[oldName];
+		// delete sheets[oldName]` would re-add the key at the end, jumping the
+		// renamed tab to the last position (tab order == Object.keys order).
+		const entries = Object.entries(sheets)
+		for (const [k] of entries) delete sheets[k]
+		for (const [k, v] of entries) sheets[k === oldName ? newName : k] = v
 		// Walk every sheet (not just the renamed one) and rewrite cross-sheet
 		// formulas that referenced the old name. Without this, `=OldName!A1`
 		// formulas in *other* sheets break with `#REF!` after a rename.
