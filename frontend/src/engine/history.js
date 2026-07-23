@@ -116,5 +116,17 @@ export function createHistory({ snapshot, restore, applyOp, revertOp, maxSize = 
 	// Seed the initial snapshot so the first undo lands on the blank state.
 	function init() { if (stack.length === 0) push() }
 
-	return { push, pushOp, undo, redo, canUndo, canRedo, init }
+	// Re-baseline: discard all history and seed a single snapshot of the
+	// CURRENT engine state. Call this after loading a doc — the pre-load
+	// init() seeded an empty snapshot, and a plain init() won't replace it
+	// (its stack-empty guard makes it a no-op once seeded). Without a
+	// re-baseline the first snapshot-based undo (e.g. insert column) would
+	// restore that empty pre-load state and blank the whole sheet.
+	function reset() {
+		stack.length = 0
+		index = -1
+		push()
+	}
+
+	return { push, pushOp, undo, redo, canUndo, canRedo, init, reset }
 }

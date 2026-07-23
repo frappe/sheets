@@ -16,6 +16,23 @@ describe('history — basic stack semantics', () => {
     expect(snapshot).toHaveBeenCalledTimes(1)
   })
 
+  it('reset re-baselines: undo after reset restores the reset snapshot, not the pre-reset one', () => {
+    // Mirrors the load sequence: init() seeds an EMPTY baseline before load,
+    // then reset() re-baselines to the loaded state. A later snapshot-based
+    // undo must land on the loaded state — never the empty pre-load snapshot.
+    const snaps = ['empty', 'loaded', 'afterEdit']
+    let idx = 0
+    const restore = vi.fn()
+    const h = createHistory({ snapshot: () => snaps[idx++], restore })
+    h.init()          // seed 'empty' (pre-load)
+    h.reset()         // re-baseline to 'loaded'
+    h.push()          // 'afterEdit' — a snapshot mutation (e.g. insert column)
+    expect(h.undo()).toBe(true)
+    expect(restore).toHaveBeenLastCalledWith('loaded', { touches: null })
+    // No further undo past the re-baselined start.
+    expect(h.canUndo()).toBe(false)
+  })
+
   it('undo restores the previous full snapshot', () => {
     const snapshots = ['A', 'B', 'C']
     let idx = 0

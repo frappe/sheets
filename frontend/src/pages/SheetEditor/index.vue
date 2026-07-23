@@ -3389,7 +3389,11 @@ async function _loadInitialData() {
     formulaValue.value = sheet.getCell('A1')
     refreshActiveFormat()
     _syncNumberFormat('A1')
-    history.init()
+    // Re-baseline history to the loaded state. The pre-load init() above
+    // seeded an EMPTY snapshot; a plain init() here is a no-op (stack already
+    // seeded), which would leave the empty snapshot as the undo baseline and
+    // blank the sheet on the first snapshot-based undo (e.g. insert column).
+    history.reset()
     syncFlags()
   } else if (props.id === 'new') {
     // Google-Sheets model: create the doc immediately so there is never an
