@@ -3204,7 +3204,7 @@ function _setupGridInstance() {
         // hence the writeSheet guard.
         if (writeSheet === sheet.getCurrentSheet()) {
           const p = parseCellId(id)
-          const grow = p && grid?.autoGrowRowFor?.(p.row, value)
+          const grow = p && grid?.autoGrowRowFor?.(p.row, p.col, value)
           if (grow) {
             op.beforeRowH = { [p.row]: grow.before }
             op.afterRowH  = { [p.row]: grow.after }

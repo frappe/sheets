@@ -1,6 +1,6 @@
 import { COLORS, TOTAL_COLS } from '../constants.js'
 import { cellId } from '../../utils/cells.js'
-import { getTextWrap, isWrapText } from '../../utils/text-wrap.js'
+import { getTextWrap, isWrapText, wrapLines, lineHeightFor } from '../../utils/text-wrap.js'
 import { CHIP, chipFont, chipColor, chipMetrics } from '../chip-geometry.js'
 import { checkboxRect, CHECKBOX } from '../checkbox-geometry.js'
 import { checkRule } from '../../engine/validation.js'
@@ -535,9 +535,10 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
 
   function _drawWrappedText(val, x, y, w, h, fmt, rightInset = 0, softWrap = true) {
     const innerW = w - rightInset
-    const lines = softWrap ? _wrapLines(val, innerW - 8) : val.split('\n')
+    const lines = softWrap ? wrapLines(val, innerW - 8, t => ctx.measureText(t).width)
+                           : String(val).split('\n')
     if (!lines.length) return
-    const lineH  = 16
+    const lineH  = lineHeightFor(fmt)
     const totalH = lines.length * lineH
     const startY = fmt.valign === 'top'    ? y + lineH / 2 + 2
                  : fmt.valign === 'bottom' ? y + h - totalH + lineH / 2 - 2
@@ -550,32 +551,6 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     ctx.beginPath(); ctx.rect(x + 1, y + 1, Math.max(0, w - 2 - rightInset), h - 2); ctx.clip()
     for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], textX, startY + i * lineH)
     ctx.restore()
-  }
-
-  // Hard newlines always break; each paragraph then soft-wraps to fit.
-  function _wrapLines(val, maxW) {
-    return val.split('\n').flatMap(par => _wrapParagraph(par, maxW))
-  }
-
-  function _wrapParagraph(par, maxW) {
-    const tokens = par.split(/(\s+)/)
-    const lines  = []
-    let line = ''
-    for (const tok of tokens) {
-      if (!tok) continue
-      if (ctx.measureText(line + tok).width <= maxW) { line += tok; continue }
-      if (/^\s+$/.test(tok)) {
-        if (line.trim()) lines.push(line.trimEnd())
-        line = ''; continue
-      }
-      for (const ch of tok) {
-        if (line && ctx.measureText(line + ch).width > maxW) {
-          lines.push(line.trimEnd()); line = ch
-        } else { line += ch }
-      }
-    }
-    if (line.trim()) lines.push(line.trimEnd())
-    return lines.length ? lines : ['']   // keep blank lines from \n\n
   }
 
   // ── Cell borders ─────────────────────────────────────────────────────────────
