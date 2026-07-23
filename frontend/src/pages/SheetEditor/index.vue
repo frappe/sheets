@@ -133,7 +133,7 @@
                 size="sm" icon="clock"
                 tooltip="Version history"
                 @click="vhOpen ? closeVersionHistory() : (notesPanel.open = false, openVersionHistory())" />
-        <Button variant="ghost" size="sm" icon="help-circle" tooltip="Keyboard shortcuts (?)" @click="showShortcutsHelp = true" />
+        <Button variant="ghost" size="sm" icon="help-circle" tooltip="Keyboard shortcuts" @click="showShortcutsHelp = true" />
         <span class="sn-topbar-divider" aria-hidden="true" />
         <!-- Presence avatars — other users currently in the workbook.
              Outline = their cursor color; tooltip says which sub-sheet
@@ -1033,19 +1033,21 @@
       </template>
     </Dialog>
 
-    <!-- Keyboard shortcut help (?) — uses Frappe UI's KeyboardShortcut for the
-         key chips so modifiers render as proper Mac glyphs and look native. -->
+    <!-- Keyboard shortcut help — generated from frappe-ui's shortcut registry
+         (see useShortcuts.js), so it can never drift from the handlers. Read via
+         getActiveShortcuts() off the same 'frappe-ui' import that registers them,
+         so both share one registry instance. -->
     <Dialog v-model="showShortcutsHelp" :options="{ title: 'Keyboard shortcuts', size: 'xl' }">
       <template #body-content>
         <div class="sn-help-grid">
-          <div v-for="g in SHORTCUT_GROUPS" :key="g.title" class="sn-help-group">
-            <div class="sn-help-title">{{ g.title }}</div>
-            <div v-for="s in g.items" :key="s.label" class="sn-help-row">
-              <span class="sn-help-label">{{ s.label }}</span>
+          <div v-for="(items, group) in shortcutGroups" :key="group" class="sn-help-group">
+            <div class="sn-help-title">{{ group }}</div>
+            <div v-for="s in items" :key="s.id.toString()" class="sn-help-row">
+              <span class="sn-help-label">{{ s.description }}</span>
               <span class="sn-help-keys">
-                <template v-for="(combo, i) in s.combos" :key="combo">
-                  <KeyboardShortcut :combo="combo" />
-                  <span v-if="i < s.combos.length - 1" class="sn-help-or">or</span>
+                <template v-for="(k, i) in s.keys" :key="k">
+                  <KeyboardShortcut :combo="shortcutCombo(s, k)" />
+                  <span v-if="i < s.keys.length - 1" class="sn-help-or">or</span>
                 </template>
               </span>
             </div>
@@ -1310,7 +1312,7 @@ import { getFunctionNames }    from '../../engine/formula.js'
 import NamedRangesDialog       from './NamedRangesDialog.vue'
 import { useSmartFill }        from './useSmartFill.js'
 import * as versionsApi        from '../../services/versions.js'
-import { Checkbox, KeyboardShortcut, TextInput, Tooltip } from 'frappe-ui'
+import { Checkbox, KeyboardShortcut, TextInput, Tooltip, getActiveShortcuts } from 'frappe-ui'
 
 const props = defineProps({ id: { type: String, default: 'new' } })
 const emit  = defineEmits(['close', 'saved'])
@@ -1654,56 +1656,26 @@ const hyperlinkUrl         = ref('')
 const hasActiveHyperlink   = computed(() => !!activeFormat.value?.hyperlink)
 const showFormulas      = ref(false)
 
-// Each row's `combos` is an array of KeyboardShortcut-compatible strings —
-// the dialog renders them as `<KeyboardShortcut :combo="…"/>` chips joined
-// by a small "or" separator when there's more than one.
-const SHORTCUT_GROUPS = [
-  { title: 'Navigation', items: [
-    { label: 'Move selection',            combos: ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'] },
-    { label: 'Jump to data-region edge',  combos: ['Mod+ArrowLeft'] },
-    { label: 'Extend selection',          combos: ['Shift+ArrowRight'] },
-    { label: 'Jump to start / end',       combos: ['Mod+Home', 'Mod+End'] },
-    { label: 'Scroll one screen',         combos: ['PageDown', 'PageUp'] },
-    { label: 'Select row / column',       combos: ['Shift+Space', 'Mod+Space'] },
-    { label: 'Select all',                combos: ['Mod+A', 'Mod+Shift+Space'] },
-  ]},
-  { title: 'Editing', items: [
-    { label: 'Edit cell',                 combos: ['F2'] },
-    { label: 'Clear cell',                combos: ['Delete', 'Backspace'] },
-    { label: 'Commit + move down',        combos: ['Enter'] },
-    { label: 'Commit + move right',       combos: ['Tab'] },
-    { label: 'Cancel edit',               combos: ['Escape'] },
-    { label: 'Fill down / right',         combos: ['Mod+D', 'Mod+R'] },
-    { label: 'Smart Fill from examples',  combos: ['Mod+E'] },
-    { label: 'Cut / Copy / Paste',        combos: ['Mod+X', 'Mod+C', 'Mod+V'] },
-    { label: 'Paste values only',         combos: ['Mod+Shift+V'] },
-    { label: 'Insert rows / columns',     combos: ['Mod+Alt+='] },
-    { label: 'Delete rows / columns',     combos: ['Mod+Alt+-'] },
-    { label: 'Undo / Redo',               combos: ['Mod+Z', 'Mod+Y'] },
-    { label: 'Repeat last action',        combos: ['F4'] },
-    { label: 'Add / edit comment',        combos: ['Shift+F2'] },
-  ]},
-  { title: 'Formatting', items: [
-    { label: 'Bold',                      combos: ['Mod+B'] },
-    { label: 'Italic',                    combos: ['Mod+I'] },
-    { label: 'Underline',                 combos: ['Mod+U'] },
-    { label: 'Strikethrough',             combos: ['Mod+Shift+X'] },
-    { label: 'Number / percent',          combos: ['Mod+Shift+1', 'Mod+Shift+5'] },
-    { label: 'Time / date',               combos: ['Mod+Shift+2', 'Mod+Shift+3'] },
-    { label: 'Currency',                  combos: ['Mod+Shift+4'] },
-  ]},
-  { title: 'View / Tools', items: [
-    { label: 'Command palette',           combos: ['Mod+K'] },
-    { label: 'Find & replace',            combos: ['Mod+F'] },
-    { label: 'Save',                      combos: ['Mod+S'] },
-    { label: 'Show formulas',             combos: ['Mod+`'] },
-    { label: 'Insert hyperlink',          combos: ['Mod+L'] },
-    { label: 'Quick filter on column',    combos: ['Alt+ArrowDown'] },
-    { label: 'Version history',           combos: ['Mod+Alt+Shift+H'] },
-    { label: 'Zoom in / out / reset',     combos: ['Mod+=', 'Mod+-', 'Mod+0'] },
-    { label: 'Shortcut help',             combos: ['?'] },
-  ]},
-]
+// Keyboard-shortcut help is generated from frappe-ui's live shortcut registry
+// (populated by useShortcuts.js via useShortcut). Grouped by each shortcut's
+// `group`; read-only-gated shortcuts drop out automatically (getActiveShortcuts
+// filters by their condition).
+const activeShortcuts = getActiveShortcuts()
+const shortcutGroups = computed(() => {
+  const groups = {}
+  for (const s of activeShortcuts.value) (groups[s.group] ??= []).push(s)
+  return groups
+})
+// Build a KeyboardShortcut `combo` string ("Mod+Shift+K") from a registry entry.
+function shortcutCombo(s, key) {
+  const parts = []
+  if (s.ctrl) parts.push('Mod')
+  if (s.shift) parts.push('Shift')
+  if (s.alt) parts.push('Alt')
+  parts.push(key)
+  return parts.join('+')
+}
+
 const selectionStats    = ref(null)
 const isDirty           = ref(false)
 const isPaintingFormat  = ref(false)
@@ -3990,7 +3962,7 @@ function _deleteRowsColsFromSelection() {
 const { onGlobalKey } = useShortcuts({
   formulaInputEl:           () => formulaInputRef.value,
   undo, redo, onSave, toggleFmt, repeatLast, toggleShowFormulas,
-  showFindReplace, showShortcutsHelp,
+  showFindReplace,
   openVersionHistory, openHyperlinkDialog, openCommentPanel, openQuickFilterForActive,
   zoomBy, resetZoom,
   commentPanel, dropdownPanel, splitText,
