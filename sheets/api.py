@@ -337,7 +337,9 @@ def list_sheets(
 		filters=filters,
 		fields=[{"COUNT": "*", "as": "total"}],
 	)[0]["total"]
-	return {"sheets": rows, "total": total}
+	# `now` shares the naive server-local frame of `modified`, so the client
+	# can bucket rows by recency without mixing server and client clocks.
+	return {"sheets": rows, "total": total, "now": str(frappe.utils.now())}
 
 
 @frappe.whitelist(allow_guest=True)

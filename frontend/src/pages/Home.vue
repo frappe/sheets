@@ -68,8 +68,9 @@
     </div>
 
     <!-- Filter toolbar — ownership tabs + sort. Hidden on the true-empty
-         state so a brand-new account isn't offered filters over nothing. -->
-    <div v-if="loading || !isTrueEmpty" class="home-toolbar">
+         state so a brand-new account isn't offered filters over nothing.
+         Kept during load errors so tab/sort changes can trigger a refetch. -->
+    <div v-if="loading || loadError || !isTrueEmpty" class="home-toolbar">
       <div class="home-toolbar-inner">
         <TabButtons v-model="ownerTab" :buttons="ownerTabs" />
         <Select v-model="sortBy" :options="sortOptions" aria-label="Sort by" />
@@ -80,6 +81,17 @@
     <div v-if="loading" class="home-body">
       <div class="home-empty">
         <Spinner class="home-spinner" />
+      </div>
+    </div>
+
+    <!-- Load failure — its own surface so stale rows from the previous
+         filter are never shown under the new one, and the branded
+         "No sheets yet" block can't masquerade as a successful result. -->
+    <div v-else-if="loadError" class="home-body">
+      <div class="home-empty">
+        <p class="home-empty-title">Couldn't load sheets</p>
+        <p class="home-empty-sub">{{ loadError }}</p>
+        <Button variant="subtle" @click="fetchSheets()">Retry</Button>
       </div>
     </div>
 
@@ -298,7 +310,7 @@ import {
   debounce,
 } from 'frappe-ui'
 import { call } from '../utils/api.js'
-import { groupSheetsByRecency } from '../utils/recency-groups.js'
+import { groupSheetsByRecency, parseFrappeDatetime } from '../utils/recency-groups.js'
 
 const emit = defineEmits(['open', 'new', 'trash'])
 
@@ -312,6 +324,11 @@ const searchQuery = ref('')   // matched server-side (debounced) so results
                               // aren't limited to already-loaded pages
 const ownerTab    = ref('all')      // 'all' | 'mine' | 'shared'
 const sortBy      = ref('modified') // 'modified' | 'title' | 'owner'
+const loadError   = ref('')   // reset-fetch failure; owns its own surface so
+                              // stale rows never render under a new filter
+const serverNow   = ref('')   // server-clock "now" from the API — same naive
+                              // frame as `modified`, keeps recency buckets
+                              // timezone-consistent
 
 // Inline error banner used by the destructive actions (delete / duplicate).
 // Mirrors the editor's `saveError` pattern — Frappe UI Badge, auto-dismissed
@@ -462,8 +479,11 @@ const listRows = ref([])
 watch(
   [sheets, sortBy],
   () => {
+    // Bucket against the server's clock so "Today" is decided in the same
+    // timezone frame the `modified` timestamps are written in.
+    const now = serverNow.value ? parseFrappeDatetime(serverNow.value) : new Date()
     listRows.value = sortBy.value === 'modified'
-      ? groupSheetsByRecency(sheets.value, new Date(), listRows.value)
+      ? groupSheetsByRecency(sheets.value, now, listRows.value)
       : sheets.value
   },
   { immediate: true }
@@ -519,6 +539,21 @@ async function fetchSheets({ append = false } = {}) {
     if (token !== reqToken) return
     sheets.value = append ? sheets.value.concat(res.sheets) : res.sheets
     total.value = res.total
+    serverNow.value = res.now || ''
+    loadError.value = ''
+  } catch (err) {
+    if (token !== reqToken) return
+    console.error('list_sheets failed:', err)
+    if (append) {
+      // Keep what's already on screen; surface the failure via the badge.
+      _flashError(err?.message || 'Load more failed')
+    } else {
+      // A failed reset must not leave the previous filter's rows rendered
+      // under the new tab/sort/search — clear and show the error surface.
+      sheets.value = []
+      total.value = 0
+      loadError.value = err?.message || 'Something went wrong. Check your connection and retry.'
+    }
   } finally {
     if (token === reqToken) {
       loading.value = false
