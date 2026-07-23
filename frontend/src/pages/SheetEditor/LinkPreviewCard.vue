@@ -1,64 +1,88 @@
 <template>
 	<div
 		v-if="open"
-		class="sn-lp-card"
+		class="sn-lp-card absolute z-40 w-[340px] overflow-hidden rounded-lg border border-outline-gray-1 bg-surface-white shadow-2xl"
 		:style="style"
 		@mouseenter="$emit('enter')"
 		@mouseleave="$emit('leave')"
 		@mousedown.stop
 		@click.stop
 	>
-		<div class="sn-lp-main">
-			<span class="sn-lp-favicon">
+		<div class="flex items-center gap-2.5 p-2.5 pl-3">
+			<span
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-surface-gray-2 text-ink-gray-5"
+			>
 				<img
 					v-if="preview.favicon && !faviconFailed"
 					:src="preview.favicon"
 					alt=""
-					width="20"
-					height="20"
+					class="h-5 w-5 rounded-sm"
 					@error="faviconFailed = true"
 				/>
-				<svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none"
-				     stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-					<circle cx="12" cy="12" r="9" />
-					<path d="M3.5 12h17M12 3a14.5 14.5 0 0 1 0 18M12 3a14.5 14.5 0 0 0 0 18" />
-				</svg>
+				<Spinner v-else-if="preview.loading" class="h-3.5 w-3.5" />
+				<LucideGlobe v-else class="h-4 w-4" />
 			</span>
 
-			<div class="sn-lp-text">
+			<div class="min-w-0 flex-1">
 				<a
-					class="sn-lp-title"
+					class="block truncate text-sm font-medium text-ink-gray-8 hover:underline"
 					:href="url"
 					target="_blank"
 					rel="noopener noreferrer"
 					:title="url"
 					@click.prevent="$emit('open')"
 				>{{ titleText }}</a>
-				<div class="sn-lp-host">{{ hostText }}</div>
+				<div class="truncate text-xs text-ink-gray-5">{{ hostText }}</div>
 			</div>
 
-			<div class="sn-lp-actions">
-				<Button variant="ghost" size="sm" :icon="copied ? 'lucide-check' : 'lucide-copy'"
-				        :tooltip="copied ? 'Copied' : 'Copy link'" @click="copyUrl" />
-				<Button v-if="canEdit" variant="ghost" size="sm" icon="lucide-pencil"
-				        tooltip="Edit link" @click="$emit('edit')" />
-				<Button v-if="canEdit" variant="ghost" size="sm" icon="lucide-unlink"
-				        tooltip="Remove link" @click="$emit('unlink')" />
+			<div class="flex shrink-0 items-center gap-0.5">
+				<Button
+					variant="ghost"
+					size="sm"
+					:icon="copied ? 'lucide-check' : 'lucide-copy'"
+					:tooltip="copied ? 'Copied' : 'Copy link'"
+					@click="copyUrl"
+				/>
+				<Button
+					v-if="canEdit"
+					variant="ghost"
+					size="sm"
+					icon="lucide-pencil"
+					tooltip="Edit link"
+					@click="$emit('edit')"
+				/>
+				<Button
+					v-if="canEdit"
+					variant="ghost"
+					size="sm"
+					icon="lucide-unlink"
+					tooltip="Remove link"
+					@click="$emit('unlink')"
+				/>
 			</div>
 		</div>
 
-		<div v-if="preview.description" class="sn-lp-desc">{{ preview.description }}</div>
+		<p
+			v-if="preview.description"
+			class="line-clamp-2 px-3 pb-2.5 text-xs leading-relaxed text-ink-gray-6"
+		>
+			{{ preview.description }}
+		</p>
 
-		<div v-if="showReplaceOffer" class="sn-lp-replace">
-			<span class="sn-lp-replace-label">Replace URL with its title?</span>
-			<button class="sn-lp-replace-yes" @click="$emit('replace')">Yes</button>
+		<div
+			v-if="showReplaceOffer"
+			class="flex items-center justify-between gap-2 border-t border-outline-gray-2 bg-surface-gray-1 px-3 py-2"
+		>
+			<span class="text-xs text-ink-gray-6">Replace URL with its title?</span>
+			<Button variant="subtle" size="sm" label="Replace" @click="$emit('replace')" />
 		</div>
 	</div>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Button } from 'frappe-ui'
+import { Button, Spinner } from 'frappe-ui'
+import LucideGlobe from '~icons/lucide/globe'
 
 const props = defineProps({
 	open:    { type: Boolean, default: false },
@@ -78,11 +102,7 @@ const faviconFailed = ref(false)
 
 watch(() => props.url, () => { copied.value = false; faviconFailed.value = false })
 
-const titleText = computed(() => {
-	if (props.preview.title) return props.preview.title
-	if (props.preview.loading) return props.url
-	return props.url
-})
+const titleText = computed(() => props.preview.title || props.url)
 
 const hostText = computed(() => {
 	if (props.preview.loading) return 'Loading preview…'
@@ -107,79 +127,14 @@ const style = computed(() => {
 </script>
 
 <style scoped>
+/* Entrance only — everything visual is espresso Tailwind utilities. Matches
+   the rise used by the other Sheets popovers. */
 .sn-lp-card {
-	position: absolute;
-	width: 340px;
-	background: var(--surface-white, #ffffff);
-	border: 1px solid var(--outline-gray-2, #e5e5e5);
-	border-radius: 10px;
-	box-shadow: 0 6px 20px -6px rgba(0, 0, 0, 0.16);
-	z-index: 40;
-	overflow: hidden;
-	animation: sn-lp-rise 120ms ease-out;
 	transform-origin: top left;
+	animation: sn-lp-rise 120ms ease-out;
 }
 @keyframes sn-lp-rise {
 	from { transform: translateY(-4px) scale(0.98); opacity: 0; }
 	to   { transform: translateY(0)    scale(1);    opacity: 1; }
 }
-
-.sn-lp-main {
-	display: flex; align-items: center; gap: 10px;
-	padding: 10px 10px 8px 12px;
-}
-.sn-lp-favicon {
-	width: 28px; height: 28px; flex-shrink: 0;
-	display: inline-flex; align-items: center; justify-content: center;
-	border-radius: 6px;
-	background: var(--surface-gray-2, #f5f5f5);
-	color: var(--ink-gray-6, #595959);
-}
-.sn-lp-favicon img { border-radius: 3px; }
-
-.sn-lp-text { flex: 1; min-width: 0; }
-.sn-lp-title {
-	display: block;
-	font-size: 13px; font-weight: 500; line-height: 18px;
-	color: #007be0;   /* matches the canvas painter's hyperlink blue */
-	text-decoration: none;
-	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.sn-lp-title:hover { text-decoration: underline; }
-.sn-lp-host {
-	font-size: 12px; line-height: 16px;
-	color: var(--ink-gray-5, #737373);
-	overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.sn-lp-actions { display: flex; gap: 2px; flex-shrink: 0; }
-
-.sn-lp-desc {
-	padding: 0 12px 10px;
-	font-size: 12px; line-height: 17px;
-	color: var(--ink-gray-6, #595959);
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
-}
-
-.sn-lp-replace {
-	display: flex; align-items: center; justify-content: space-between; gap: 8px;
-	padding: 8px 12px;
-	background: #007be0;
-	color: #ffffff;
-	font-size: 12.5px;
-}
-.sn-lp-replace-yes {
-	flex-shrink: 0;
-	padding: 3px 14px;
-	border: 1px solid rgba(255, 255, 255, 0.7);
-	border-radius: 999px;
-	background: transparent;
-	color: #ffffff;
-	font: inherit; font-weight: 500;
-	cursor: pointer;
-}
-.sn-lp-replace-yes:hover { background: rgba(255, 255, 255, 0.12); }
 </style>
