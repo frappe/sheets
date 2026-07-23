@@ -191,3 +191,46 @@ describe('clipboard — measure external paste extent (undo-capture bounds)', ()
     expect(cb.measureTextPaste('   ', 'A1', null)).toBeNull()
   })
 })
+
+// ── URL auto-linking on external text paste ──────────────────────────────────
+
+function makeFormats() {
+  const store = {}
+  return {
+    get:   (id) => store[id] ?? {},
+    set:   (id, fmt) => { store[id] = { ...(store[id] || {}), ...fmt } },
+    clear: (id) => { delete store[id] },
+    _store: () => store,
+  }
+}
+
+describe('clipboard — pasteFromText auto-links whole-cell URLs', () => {
+  let sheet, formats, cb
+  beforeEach(() => {
+    sheet   = makeSheet()
+    formats = makeFormats()
+    cb      = createClipboard({ sheet, formats })
+  })
+
+  it('sets fmt.hyperlink for URL cells, leaves plain text alone', () => {
+    cb.pasteFromText('https://frappe.io/\tplain text\nfrappe.io\t42', 'A1', null)
+    const f = formats._store()
+    expect(sheet._store().A1).toBe('https://frappe.io/')
+    expect(f.A1).toEqual({ hyperlink: 'https://frappe.io/' })
+    expect(f.B1).toBeUndefined()
+    expect(f.A2).toEqual({ hyperlink: 'https://frappe.io' })   // bare domain normalized
+    expect(f.B2).toBeUndefined()
+  })
+
+  it('tiled single-URL paste links every destination cell', () => {
+    cb.pasteFromText('www.frappe.io', 'A1', null, { r0: 0, c0: 0, r1: 1, c1: 0 })
+    const f = formats._store()
+    expect(f.A1).toEqual({ hyperlink: 'https://www.frappe.io' })
+    expect(f.A2).toEqual({ hyperlink: 'https://www.frappe.io' })
+  })
+
+  it('does not link when no formats engine is wired (headless paste)', () => {
+    const bare = createClipboard({ sheet: makeSheet() })
+    expect(bare.pasteFromText('https://frappe.io/', 'A1', null)).toBe(true)
+  })
+})

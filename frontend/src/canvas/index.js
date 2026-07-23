@@ -12,7 +12,7 @@ import { checkboxRect } from './checkbox-geometry.js'
 
 export { colLabel, cellId, parseCellId } from '../utils/cells.js'
 
-export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true, isCellEditable, onBlockedEdit, readOnly = false } = {}) {
+export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getFormat, onFill, onBatchCommit, getMergeInfo, isSlave, getMasterId, getComment, getValidation, getCondFormat, getSparkline, getRightInset, onHyperlinkClick, onLinkHover, onDropdownClick, onCheckboxToggle, onPivotDrill, onResizeEnd, getSheetNames, getCurrentSheet, getEditingHomeSheet, getDisplay, getCellIds, lazyValues = false, canEdit = () => true, isCellEditable, onBlockedEdit, readOnly = false } = {}) {
   // When true, the grid is a viewer: the in-cell editor never opens, so no
   // keystroke / F2 / double-click can mutate a cell. Selection, scrolling and
   // copy still work. Toggled at runtime via setReadOnly (public link viewers).
@@ -1330,6 +1330,14 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     showEditor(getValue(cellId(h.r, h.c)) ?? '', 'edit')
   })
 
+  let _lastLinkHover = null   // 'r,c' of the linked cell the pointer is on
+
+  canvas.addEventListener('mouseleave', () => {
+    if (_lastLinkHover === null) return
+    _lastLinkHover = null
+    onLinkHover?.(null)
+  })
+
   canvas.addEventListener('mousemove', e => {
     const rect = canvas.getBoundingClientRect()
     const resizeCol = geo.hitTestColResize(e.clientX, e.clientY, rect)
@@ -1343,6 +1351,16 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     else if (overFill)                             canvas.style.cursor = 'crosshair'
     else if (overLink)                             canvas.style.cursor = 'pointer'
     else                                           canvas.style.cursor = 'default'
+
+    // Hover-card feed: notify once per enter/leave of a linked cell (not per
+    // pixel). The editor layers debounce + the popover itself on top of this.
+    const linkKey = overLink ? `${hoverCell.r},${hoverCell.c}` : null
+    if (linkKey !== _lastLinkHover) {
+      _lastLinkHover = linkKey
+      onLinkHover?.(linkKey
+        ? { r: hoverCell.r, c: hoverCell.c, id: cellId(hoverCell.r, hoverCell.c), url: overLink }
+        : null)
+    }
 
     if (filling) {
       if (!filling.moved) {

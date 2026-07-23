@@ -2,6 +2,7 @@
 
 import { colLabel, parseCellId } from '../utils/cells.js'
 import { adjustFormula } from './formula-adjust.js'
+import { detectHyperlink } from './links.js'
 
 export function createClipboard({ sheet, formats, condFormat = null, validation = null, getPivotAt = null, createPivotFromPaste = null, protection = null }) {
 	let _data    = null   // { 'dr,dc': rawValue }
@@ -235,11 +236,20 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 	// honored by padding blanks; rowspan is left as-is (rare, and its cell text
 	// simply lands in the top row of the span).
 	function parseHTMLTable(html) {
+		return _parseHTMLGrid(html)?.grid ?? null
+	}
+
+	// Full HTML-table parse: cell text grid + per-cell hyperlink map keyed by
+	// 'dr,dc'. A cell whose content carries an <a href> (Google Sheets, Excel
+	// Online, web pages) keeps that target so the paste can restore linkness —
+	// textContent alone would flatten "Frappe" → dead text.
+	function _parseHTMLGrid(html) {
 		if (!html || typeof DOMParser === 'undefined') return null
 		const doc   = new DOMParser().parseFromString(html, 'text/html')
 		const table = doc.querySelector('table')
 		if (!table) return null
-		const grid = []
+		const grid  = []
+		const links = {}
 		// Only the outer table's own rows/cells — a bare querySelectorAll('tr')
 		// descends into any nested <table> inside a cell (common in web-page
 		// clipboard HTML) and bleeds its rows into the outer grid. A nested
@@ -252,6 +262,11 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 			const row = []
 			for (const cell of tr.querySelectorAll(':scope > th, :scope > td')) {
 				const text = (cell.textContent ?? '').replace(/\s+/g, ' ').trim()
+				const href = cell.querySelector('a[href]')?.getAttribute('href')
+				// Only http(s)/mailto targets — clipboard HTML can carry
+				// javascript: or app-internal schemes we must not store.
+				if (href && /^(https?:|mailto:)/i.test(href))
+					links[`${grid.length},${row.length}`] = href
 				row.push(text)
 				const span = parseInt(cell.getAttribute('colspan') || '1', 10)
 				for (let i = 1; i < span; i++) row.push('')
@@ -260,15 +275,15 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		}
 		// Drop trailing all-empty rows some editors append.
 		while (grid.length && grid[grid.length - 1].every(c => c === '')) grid.pop()
-		return grid.length ? grid : null
+		return grid.length ? { grid, links } : null
 	}
 
 	// Paste an HTML-table grid (from an external app's `text/html` flavor).
 	// Shares the placement/tiling/bulk-write path with pasteFromText.
 	function pasteFromHTML(html, anchorId, historyPush, destSel = null) {
-		const grid = parseHTMLTable(html)
-		if (!grid) return false
-		return _pasteGrid(grid, anchorId, historyPush, destSel)
+		const parsed = _parseHTMLGrid(html)
+		if (!parsed) return false
+		return _pasteGrid(parsed.grid, anchorId, historyPush, destSel, parsed.links)
 	}
 
 	// Paste raw text (from system clipboard / external app).  Honors destSel so
@@ -328,7 +343,9 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 
 	// Place a 2D grid of cell strings at the anchor (or tiled across destSel),
 	// then ship one bulk write. Shared by pasteFromText and pasteFromHTML.
-	function _pasteGrid(grid, anchorId, historyPush, destSel = null) {
+	// `links` maps 'dr,dc' → href for cells that arrived as HTML anchors; cells
+	// without one still auto-link when their pasted text IS a URL (Google UX).
+	function _pasteGrid(grid, anchorId, historyPush, destSel = null, links = null) {
 		const anch = parseCellId(anchorId)
 		if (!anch) return false
 		const { srcRows, srcCols, tileable } = _gridGeometry(grid, anch, destSel)
@@ -337,18 +354,24 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		// paste() above. Big external pastes (Excel/CSV via system clipboard)
 		// were the worst case here.
 		const writes = {}
+		const linkAt = {}   // destination id → hyperlink url
+		const place = (id, val, dr, dc) => {
+			writes[id] = val
+			const url = links?.[`${dr},${dc}`] ?? detectHyperlink(val)
+			if (url) linkAt[id] = url
+		}
 		if (tileable) {
 			for (let r = destSel.r0; r <= destSel.r1; r++) {
 				for (let c = destSel.c0; c <= destSel.c1; c++) {
 					const dr = (r - destSel.r0) % srcRows
 					const dc = (c - destSel.c0) % srcCols
-					writes[colLabel(c) + (r + 1)] = grid[dr][dc] ?? ''
+					place(colLabel(c) + (r + 1), grid[dr][dc] ?? '', dr, dc)
 				}
 			}
 		} else {
 			grid.forEach((row, dr) =>
 				row.forEach((val, dc) => {
-					writes[colLabel(anch.col + dc) + (anch.row + dr + 1)] = val
+					place(colLabel(anch.col + dc) + (anch.row + dr + 1), val, dr, dc)
 				}))
 		}
 		const sn = sheet.getCurrentSheet()
@@ -359,6 +382,7 @@ export function createClipboard({ sheet, formats, condFormat = null, validation 
 		}
 		if (sheet.batchSetCells) sheet.batchSetCells(writes, sn, { replace: false })
 		else                     for (const [id, v] of Object.entries(writes)) sheet.setCell(id, v, sn)
+		if (formats) for (const [id, url] of Object.entries(linkAt)) formats.set(id, { hyperlink: url }, sn)
 		historyPush?.()   // post-mutate snapshot
 		return true
 	}

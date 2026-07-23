@@ -363,8 +363,11 @@
     />
 
     <!-- Canvas grid + filter overlay -->
+    <!-- wheel.capture: the link hover card is anchored to a cell's pixel rect,
+         which any scroll invalidates — hide it rather than let it float. -->
     <div ref="gridWrapRef" class="sn-grid-wrap"
-         :class="{ 'sn-painting-format': isPaintingFormat, 'sn-preview-locked': !!vhActive }">
+         :class="{ 'sn-painting-format': isPaintingFormat, 'sn-preview-locked': !!vhActive }"
+         @wheel.capture.passive="linkCard.open = false">
       <canvas ref="canvasRef" />
 
       <!-- Initial-load shim. The canvas is mounted (so grid.resize / event
@@ -460,6 +463,21 @@
         @choose="onSplitChoose"
         @apply="onSplitApply"
         @cancel="onSplitCancel"
+      />
+
+      <LinkPreviewCard
+        :open="linkCard.open"
+        :anchor="linkCard.anchor"
+        :url="linkCard.url"
+        :preview="linkCard.preview"
+        :can-edit="!readOnly"
+        :offer-replace="linkCard.offerReplace"
+        @enter="onLinkCardEnter"
+        @leave="onLinkCardLeave"
+        @open="openLinkCardUrl"
+        @edit="editLinkCardCell"
+        @unlink="unlinkLinkCardCell"
+        @replace="replaceLinkWithTitle"
       />
 
       <!-- Outline around the active filter's range so its extent is visible.
@@ -1250,6 +1268,8 @@ import { createValidationEngine } from '../../engine/validation.js'
 import { createProtectionEngine } from '../../engine/protection.js'
 import { chipColor } from '../../canvas/chip-geometry.js'
 import { createCondFormatEngine } from '../../engine/cond-format.js'
+import { detectHyperlink, isAutoLinkText } from '../../engine/links.js'
+import { fetchLinkPreview } from '../../services/linkPreview.js'
 import { useToolbar }          from './useToolbar.js'
 import { usePersistence }      from './usePersistence.js'
 import { useEditOps }          from './useEditOps.js'
@@ -1269,6 +1289,7 @@ import VersionHistory          from './VersionHistory.vue'
 import VersionPreviewBanner    from './VersionPreviewBanner.vue'
 import CellHistoryPopover      from './CellHistoryPopover.vue'
 import SplitTextPopover        from './SplitTextPopover.vue'
+import LinkPreviewCard         from './LinkPreviewCard.vue'
 import ShareDialog             from './ShareDialog.vue'
 import AISettingsDialog        from './AISettingsDialog.vue'
 import AskBar                  from './AskBar.vue'
@@ -3170,6 +3191,9 @@ function _setupGridInstance() {
         history.pushOp(op)
         broadcastCellChange(writeSheet, id, value)
       }
+      // Outside the changed-guard: re-committing an unchanged URL text (e.g.
+      // pre-existing "frappe.io" data) still picks up its link.
+      _maybeAutoLink([{ id, value, before }], writeSheet)
       editingHomeSheet.value = null
       editingHomeCell.value  = null
       syncFlags()
@@ -3222,6 +3246,7 @@ function _setupGridInstance() {
       return p.row === range.r0 && p.col >= range.c0 && p.col <= range.c1 ? 19 : 0
     },
     onHyperlinkClick(url) { window.open(url, '_blank', 'noopener,noreferrer') },
+    onLinkHover: _onLinkHover,
     onDropdownClick(id, rule, pos) { openDropdown(id, rule, pos) },
     onCheckboxToggle(id) { toggleCheckbox(id) },
     onPivotDrill(r, c) { return drillDownAt(r, c) },
@@ -3253,6 +3278,12 @@ function _setupGridInstance() {
         history.pushOp(op)
         broadcastBatchChange(sheet.getCurrentSheet(), refs.map(id => ({ id, value: after[id] })))
       }
+      _maybeAutoLink(
+        cells.map(({ id, value }) => ({
+          id, value, before: before[id] !== undefined ? before[id] : value,
+        })),
+        sheet.getCurrentSheet(),
+      )
       syncFlags()
       isDirty.value = true
       recomputePivotsForSheet(sheet.getCurrentSheet())
@@ -3820,6 +3851,7 @@ function _commitFormulaBar() {
   editingHomeSheet.value = null
   editingHomeCell.value  = null
   _pushEditOp(targetSheet, before, 'Edit cell')
+  _maybeAutoLink([{ id: targetId, value: formulaValue.value, before: before[targetId] }], targetSheet)
 }
 
 function _cancelFormulaBar() {
@@ -5174,6 +5206,35 @@ function onFontSizeInput(e) {
 }
 
 // ── Hyperlink ─────────────────────────────────────────────────────────────────
+
+// Google-Sheets URL auto-detection: after a typed edit commits, a whole-cell
+// URL gets fmt.hyperlink set on it. Recorded as its OWN format op after the
+// edit op, so the first Ctrl+Z strips just the link and the second undoes the
+// text — matching Google's "undo removes the auto-link" behavior. The inverse
+// also runs: editing an auto-linked cell (text === its URL) to a non-URL
+// drops the stale link; custom display text set via Ctrl+L keeps it.
+
+// The hyperlink patch a committed edit implies for one cell, or null.
+function _autoLinkChange(id, value, before, sn) {
+	const url  = detectHyperlink(String(value ?? ''))
+	const prev = formats.getCellFormat(id, sn).hyperlink || null
+	if (url) return prev === url ? null : { id, url }
+	return prev && isAutoLinkText(before, prev) ? { id, url: null } : null
+}
+
+// cells: [{ id, value, before }] — single-cell commits and Ctrl+Enter batch
+// commits share this; a batch records ONE format op so one undo strips all.
+function _maybeAutoLink(cells, sn) {
+	const changes = cells.map(c => _autoLinkChange(c.id, c.value, c.before, sn)).filter(Boolean)
+	if (!changes.length) return
+	_recordFormatOp(changes.map(c => c.id), sn, () => {
+		for (const { id, url } of changes) formats.applyToRange([id], { hyperlink: url }, sn)
+	})
+	refreshActiveFormat()
+	grid?.render()
+	syncFlags()
+}
+
 function openHyperlinkDialog() {
   const id  = activeCell.value
   const cur = sheet.getCell(id)
@@ -5209,6 +5270,106 @@ function removeHyperlink() {
   syncFlags()
   isDirty.value = true
   showHyperlinkDialog.value = false
+}
+
+// ── Link hover card ───────────────────────────────────────────────────────────
+// Google-style preview card over a linked cell: favicon/title/description from
+// the server (see sheets/link_preview.py), plus copy / edit / unlink actions
+// and the "Replace URL with its title?" offer for auto-linked cells.
+
+const linkCard = reactive({
+  open: false, id: null, r: 0, c: 0, url: '',
+  anchor: null,        // { x, y } canvas-local px
+  preview: {},         // { loading, error, title, description, favicon, host }
+  offerReplace: false,
+})
+let _linkShowTimer = null
+let _linkHideTimer = null
+
+// Canvas feed — fires once on entering/leaving a linked cell. Short delays on
+// both edges so the card neither flickers during a sweep across links nor
+// vanishes while the pointer travels from the cell into the card.
+function _onLinkHover(info) {
+  if (info) {
+    clearTimeout(_linkHideTimer)
+    if (linkCard.open && linkCard.id === info.id && linkCard.url === info.url) return
+    clearTimeout(_linkShowTimer)
+    _linkShowTimer = setTimeout(() => _openLinkCard(info), 300)
+  } else {
+    clearTimeout(_linkShowTimer)
+    _scheduleLinkCardHide()
+  }
+}
+
+function _scheduleLinkCardHide() {
+  clearTimeout(_linkHideTimer)
+  _linkHideTimer = setTimeout(() => { linkCard.open = false }, 250)
+}
+
+function onLinkCardEnter() { clearTimeout(_linkHideTimer) }
+function onLinkCardLeave() { _scheduleLinkCardHide() }
+
+function _openLinkCard(info) {
+  const rect = grid?.getCellRect?.(info.r, info.c)
+  if (!rect) return
+  const CARD_W = 340, EST_H = 120
+  const wrapW = gridWrapRef.value?.offsetWidth  ?? Infinity
+  const wrapH = gridWrapRef.value?.offsetHeight ?? Infinity
+  const x = Math.max(0, Math.min(rect.x, wrapW - CARD_W - 8))
+  const y = rect.y + rect.height + EST_H > wrapH
+          ? Math.max(0, rect.y - EST_H)
+          : rect.y + rect.height + 2
+  const isHttp = /^https?:\/\//i.test(info.url)
+  Object.assign(linkCard, {
+    open: true, id: info.id, r: info.r, c: info.c, url: info.url,
+    anchor: { x, y },
+    preview: isHttp ? { loading: true } : {},
+    offerReplace: false,
+  })
+  if (!isHttp) return
+  fetchLinkPreview(info.url).then(res => {
+    // Pointer may have moved on — only fill the card still showing this URL.
+    if (!linkCard.open || linkCard.url !== info.url) return
+    linkCard.preview = { ...res, loading: false }
+    linkCard.offerReplace = !readOnly.value
+      && !!res.title
+      && isAutoLinkText(sheet.getCell(linkCard.id), linkCard.url)
+      && !_cellSilentlyProtected(linkCard.id)
+  })
+}
+
+function openLinkCardUrl() {
+  window.open(linkCard.url, '_blank', 'noopener,noreferrer')
+}
+
+function editLinkCardCell() {
+  linkCard.open = false
+  grid?.moveTo?.(linkCard.r, linkCard.c)   // onSelect syncs activeCell
+  openHyperlinkDialog()
+}
+
+function unlinkLinkCardCell() {
+  const sn = sheet.getCurrentSheet()
+  const id = linkCard.id
+  linkCard.open = false
+  if (!id || readOnly.value || _cellBlocked(id, sn)) return
+  _recordFormatOp([id], sn, () => formats.applyToRange([id], { hyperlink: null }, sn))
+  refreshActiveFormat()
+  grid?.render()
+  syncFlags()
+  isDirty.value = true
+}
+
+function replaceLinkWithTitle() {
+  const sn    = sheet.getCurrentSheet()
+  const id    = linkCard.id
+  const title = linkCard.preview?.title
+  linkCard.open = false
+  if (!id || !title || readOnly.value || _cellBlocked(id, sn)) return
+  const before = { [id]: sheet.getCell(id, sn) }
+  sheet.setCell(id, title, sn)
+  _pushEditOp(sn, before, 'Replace URL with title')
+  if (activeCell.value === id) formulaValue.value = title
 }
 
 function openInsertMany(kind, below = false) {

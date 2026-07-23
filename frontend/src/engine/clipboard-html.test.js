@@ -86,3 +86,42 @@ describe('clipboard — pasteFromHTML (external table paste)', () => {
     expect(cb.measureHTMLPaste('<p>no table</p>', 'A1', null)).toBeNull()
   })
 })
+
+// ── Hyperlink preservation from clipboard HTML ───────────────────────────────
+
+function makeFormats() {
+  const store = {}
+  return {
+    get:   (id) => store[id] ?? {},
+    set:   (id, fmt) => { store[id] = { ...(store[id] || {}), ...fmt } },
+    clear: (id) => { delete store[id] },
+    _store: () => store,
+  }
+}
+
+describe('clipboard — pasteFromHTML keeps <a href> linkness', () => {
+  it('maps anchor targets onto fmt.hyperlink with the anchor text as value', () => {
+    const sheet   = makeSheet()
+    const formats = makeFormats()
+    const cb      = createClipboard({ sheet, formats })
+    const html = '<table><tr>' +
+                 '<td><a href="https://frappe.io/">Frappe</a></td>' +
+                 '<td>no link</td></tr></table>'
+    expect(cb.pasteFromHTML(html, 'A1', null)).toBe(true)
+    expect(sheet._store().A1).toBe('Frappe')
+    expect(formats._store().A1).toEqual({ hyperlink: 'https://frappe.io/' })
+    expect(formats._store().B1).toBeUndefined()
+  })
+
+  it('ignores javascript: anchors but still auto-links URL-shaped text', () => {
+    const sheet   = makeSheet()
+    const formats = makeFormats()
+    const cb      = createClipboard({ sheet, formats })
+    const html = '<table><tr>' +
+                 '<td><a href="javascript:alert(1)">click</a></td>' +
+                 '<td>https://frappe.io/</td></tr></table>'
+    cb.pasteFromHTML(html, 'A1', null)
+    expect(formats._store().A1).toBeUndefined()
+    expect(formats._store().B1).toEqual({ hyperlink: 'https://frappe.io/' })
+  })
+})
