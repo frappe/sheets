@@ -204,6 +204,18 @@ watch(() => props.isPublicWrite, (v) => {
   if (show.value && !_persistingPublic.value) publicPerms.value = v ? 'editor' : 'reader'
 })
 
+// get_sheet can resolve *after* the dialog is already open — a fast click on
+// Share before the sheet finishes loading opens it with ownerId still the
+// current viewer, then ownerId flips to the real owner once load lands. Re-run
+// the owner-profile lookup (so the row shows the real name/avatar, not a raw
+// email) and re-filter the member list, which keys off ownerId too.
+watch(() => props.ownerId, () => {
+  if (show.value) {
+    fetchOwnerInfo()
+    fetchShares()
+  }
+})
+
 // ── inline error banner ──────────────────────────────────────────────────
 //
 // Every share endpoint can fail with PermissionError (e.g. a read-only
