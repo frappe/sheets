@@ -67,15 +67,25 @@
       </div>
     </div>
 
-    <!-- Content -->
-    <div class="home-body">
-      <!-- Loading -->
-      <div v-if="loading" class="home-empty">
+    <!-- Filter toolbar — ownership tabs + sort. Hidden on the true-empty
+         state so a brand-new account isn't offered filters over nothing. -->
+    <div v-if="loading || !isTrueEmpty" class="home-toolbar">
+      <div class="home-toolbar-inner">
+        <TabButtons v-model="ownerTab" :buttons="ownerTabs" />
+        <Select v-model="sortBy" :options="sortOptions" aria-label="Sort by" />
+      </div>
+    </div>
+
+    <!-- Loading (initial fetch or a filter/sort/search reset) -->
+    <div v-if="loading" class="home-body">
+      <div class="home-empty">
         <Spinner class="home-spinner" />
       </div>
+    </div>
 
-      <!-- Empty state (no sheets at all) -->
-      <div v-else-if="!sheets.length" class="home-empty">
+    <!-- Empty state (no sheets at all, no filters in play) -->
+    <div v-else-if="isTrueEmpty" class="home-body">
+      <div class="home-empty">
         <div class="home-empty-icon">
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
             <rect width="48" height="48" rx="8" fill="#f3f3f3"/>
@@ -89,18 +99,20 @@
         <p class="home-empty-sub">Create one to get started</p>
         <Button variant="solid" @click="emit('new')">New Sheet</Button>
       </div>
+    </div>
 
-      <!-- No search match (grid only — list mode delegates to ListView's
-           built-in emptyState option). -->
-      <div v-else-if="viewMode === 'grid' && !filteredSheets.length" class="home-empty">
-        <p class="home-empty-title">No matches for “{{ searchQuery }}”</p>
-        <p class="home-empty-sub">Try a different name.</p>
+    <!-- Sheet grid — keeps the whole-body scroll; Load More is a plain
+         centered button (ListFooter is list-view chrome). -->
+    <div v-else-if="viewMode === 'grid'" class="home-body">
+      <div v-if="!sheets.length" class="home-empty">
+        <p class="home-empty-title">{{ filteredEmptyState.title }}</p>
+        <p class="home-empty-sub">{{ filteredEmptyState.description }}</p>
+        <Button v-if="filteredEmptyState.button" variant="solid" @click="emit('new')">New Sheet</Button>
       </div>
-
-      <!-- Sheet grid -->
-      <div v-else-if="viewMode === 'grid'" class="home-grid">
+      <template v-else>
+      <div class="home-grid">
         <div
-          v-for="sheet in filteredSheets"
+          v-for="sheet in sheets"
           :key="sheet.name"
           class="home-card"
           @click="emit('open', sheet.name)"
@@ -153,14 +165,29 @@
           </div>
         </div>
       </div>
+      <div class="home-loadmore">
+        <Button
+          v-if="sheets.length < total"
+          variant="subtle"
+          :loading="loadingMore"
+          @click="loadMore"
+        >Load more</Button>
+        <span class="home-count">{{ sheets.length }} of {{ total }}</span>
+      </div>
+      </template>
+    </div>
 
-      <!-- Sheet list — Frappe UI ListView. No custom wrapper; the
-           component owns its header bg + row dividers. Empty / no-match
-           states are handled via the options.emptyState contract. -->
+    <!-- Sheet list — Frappe UI ListView with its own internal scroll (its
+         rows region is h-full overflow-y-auto), so topbar, toolbar, column
+         header and footer stay put while rows scroll. Rows are grouped by
+         recency under the default sort; empty / no-match states go through
+         the options.emptyState contract. -->
+    <div v-else class="home-listshell">
+      <div class="home-listcol">
       <ListView
-        v-else
+        class="h-full"
         :columns="listColumns"
-        :rows="filteredSheets"
+        :rows="listRows"
         row-key="name"
         :options="listOptions"
       >
@@ -200,6 +227,17 @@
           />
         </template>
       </ListView>
+      <!-- The empty #left slot suppresses ListFooter's page-size TabButtons —
+           we only want its Load More button + "X of Y" count. -->
+      <ListFooter
+        v-if="sheets.length"
+        class="home-listfooter"
+        :options="{ rowCount: sheets.length, totalCount: total }"
+        @loadMore="loadMore"
+      >
+        <template #left><span /></template>
+      </ListFooter>
+      </div>
     </div>
 
     <!-- Rename dialog -->
@@ -242,7 +280,7 @@
 </template>
 
 <script setup>
-import { ref, computed, h, onMounted } from 'vue'
+import { ref, computed, h, onMounted, watch } from 'vue'
 import {
   Avatar,
   Badge,
@@ -254,14 +292,26 @@ import {
   Dropdown,
   ListView,
   ListRowItem,
+  ListFooter,
+  TabButtons,
+  Select,
+  debounce,
 } from 'frappe-ui'
 import { call } from '../utils/api.js'
+import { groupSheetsByRecency } from '../utils/recency-groups.js'
 
 const emit = defineEmits(['open', 'new', 'trash'])
 
-const sheets       = ref([])
-const loading      = ref(true)
-const searchQuery  = ref('')
+const PAGE_SIZE = 50
+
+const sheets      = ref([])   // accumulated pages, in server sort order
+const total       = ref(0)    // permission-aware count for the active filters
+const loading     = ref(true) // initial load + any filter/sort/search reset
+const loadingMore = ref(false)
+const searchQuery = ref('')   // matched server-side (debounced) so results
+                              // aren't limited to already-loaded pages
+const ownerTab    = ref('all')      // 'all' | 'mine' | 'shared'
+const sortBy      = ref('modified') // 'modified' | 'title' | 'owner'
 
 // Inline error banner used by the destructive actions (delete / duplicate).
 // Mirrors the editor's `saveError` pattern — Frappe UI Badge, auto-dismissed
@@ -354,37 +404,70 @@ const listColumns = [
   { label: '', key: '_actions', width: '60px', align: 'right' },
 ]
 
+const ownerTabs = [
+  { label: 'All', value: 'all' },
+  { label: 'My sheets', value: 'mine' },
+  { label: 'Shared with me', value: 'shared' },
+]
+
+const sortOptions = [
+  { label: 'Last modified', value: 'modified' },
+  { label: 'Name A–Z', value: 'title' },
+  { label: 'Owner', value: 'owner' },
+]
+
+// "Truly" empty = the account has no visible sheets at all, as opposed to
+// a search/tab combination that matched nothing. Gets the branded block.
+const isTrueEmpty = computed(
+  () => !sheets.value.length && !searchQuery.value.trim() && ownerTab.value === 'all'
+)
+
+// Empty-state copy when a search or tab filtered everything out. Reached
+// only when !isTrueEmpty, so no search + non-"shared" tab implies "mine".
+// Shared by ListView's emptyState contract and the grid empty branch.
+const filteredEmptyState = computed(() => {
+  const q = searchQuery.value.trim()
+  if (q) {
+    return { title: `No matches for "${q}"`, description: 'Try a different name.' }
+  }
+  if (ownerTab.value === 'shared') {
+    return {
+      title: 'Nothing shared with you yet',
+      description: 'Sheets others share with you show up here.',
+    }
+  }
+  return {
+    title: "You don't own any sheets yet",
+    description: 'Create one to get started.',
+    button: { label: 'New Sheet', variant: 'solid', onClick: () => emit('new') },
+  }
+})
+
 // `emptyState` is ListView's built-in contract — it renders inside the
-// component (below the header) when `rows` is empty, so we don't need an
-// outer v-if branch for the no-match case in list mode.
+// component (below the header) when `rows` is empty.
 const listOptions = computed(() => ({
   selectable: false,
   showTooltip: true,
   rowHeight: 40,
   onRowClick: (row) => emit('open', row.name),
-  emptyState: searchQuery.value
-    ? {
-        title: `No matches for "${searchQuery.value}"`,
-        description: 'Try a different name.',
-      }
-    : {
-        title: 'No sheets yet',
-        description: 'Create one to get started.',
-        button: {
-          label: 'New Sheet',
-          variant: 'solid',
-          onClick: () => emit('new'),
-        },
-      },
+  emptyState: filteredEmptyState.value,
 }))
 
-// Filter by title, case-insensitive substring match. Sort order from the API
-// (modified desc) is preserved by `filter`.
-const filteredSheets = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return sheets.value
-  return sheets.value.filter(s => (s.title || '').toLowerCase().includes(q))
-})
+// List rows, grouped by recency only under the default modified sort —
+// time buckets make no sense against a name/owner ordering. Rebuilt via a
+// watch (not a computed) so each rebuild can carry forward the `collapsed`
+// flags that ListView's group headers mutate in place; a computed would
+// re-expand every group on Load More.
+const listRows = ref([])
+watch(
+  [sheets, sortBy],
+  () => {
+    listRows.value = sortBy.value === 'modified'
+      ? groupSheetsByRecency(sheets.value, new Date(), listRows.value)
+      : sheets.value
+  },
+  { immediate: true }
+)
 
 // Per-card 3-dot menu. Rename/Delete are owner-only — both backend
 // endpoints require write/delete perm, which a shared viewer/editor
@@ -413,13 +496,41 @@ const renaming         = ref(false)
 
 onMounted(fetchSheets)
 
-async function fetchSheets() {
-  loading.value = true
+// Tab/sort changes reset to page 1 immediately; search debounces on top.
+watch([ownerTab, sortBy], () => fetchSheets())
+watch(searchQuery, debounce(() => fetchSheets(), 300))
+
+// Monotonic token invalidates in-flight responses, so a slow page-1 fetch
+// can't clobber the rows of a newer tab/sort/search request.
+let reqToken = 0
+
+async function fetchSheets({ append = false } = {}) {
+  const token = ++reqToken
+  if (append) loadingMore.value = true
+  else loading.value = true
   try {
-    sheets.value = await call('sheets.api.list_sheets')
+    const res = await call('sheets.api.list_sheets', {
+      start: append ? sheets.value.length : 0,
+      limit: PAGE_SIZE,
+      search: searchQuery.value.trim(),
+      owner_filter: ownerTab.value,
+      order_by: sortBy.value,
+    })
+    if (token !== reqToken) return
+    sheets.value = append ? sheets.value.concat(res.sheets) : res.sheets
+    total.value = res.total
   } finally {
-    loading.value = false
+    if (token === reqToken) {
+      loading.value = false
+      loadingMore.value = false
+    }
   }
+}
+
+function loadMore() {
+  if (loading.value || loadingMore.value) return
+  if (sheets.value.length >= total.value) return
+  fetchSheets({ append: true })
 }
 
 function formatDate(iso) {
@@ -444,6 +555,7 @@ async function doDelete() {
   try {
     await call('sheets.api.delete_sheet', { name: deleteTarget.value.name })
     sheets.value = sheets.value.filter(s => s.name !== deleteTarget.value.name)
+    total.value = Math.max(0, total.value - 1)
     showDeleteDialog.value = false
   } catch (err) {
     console.error('Delete failed:', err)
@@ -542,11 +654,26 @@ async function duplicate(sheet) {
   color: var(--ink-gray-9);
 }
 
+/* Filter toolbar — sits between the topbar and content, outside any scroll
+   region so it stays put in both view modes. */
+.home-toolbar {
+  flex-shrink: 0;
+  padding: 16px 32px 8px;
+}
+.home-toolbar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .home-body {
   flex: 1;
   min-height: 0;          /* lets flex children own their own scroll */
   overflow-y: auto;       /* the actual scroll container */
-  padding: 40px 32px;
+  padding: 16px 32px 40px;
   width: 100%;
 }
 
@@ -672,7 +799,43 @@ async function duplicate(sheet) {
   flex-shrink: 0;
 }
 
+/* Grid-mode Load More — centered button + quiet count below the cards. */
+.home-loadmore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+.home-count {
+  font-size: 12px;
+  letter-spacing: .02em;
+  color: var(--ink-gray-5);
+}
+
 /* ── List view ─────────────────────────────────────────────────────────────
    Frappe UI's ListView owns its own header/row styling — header background,
-   gridTemplateColumns, dividers, hover. We don't wrap it. */
+   gridTemplateColumns, dividers, hover. The shell bounds its height so the
+   rows region (h-full overflow-y-auto inside ListView) scrolls internally,
+   keeping the column header and ListFooter fixed. */
+.home-listshell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0 32px 12px;
+}
+.home-listcol {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+}
+.home-listfooter {
+  flex-shrink: 0;
+  padding: 8px 4px;
+  border-top: 1px solid var(--outline-gray-2);
+}
 </style>

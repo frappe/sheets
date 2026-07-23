@@ -281,27 +281,63 @@ def unshare_sheet(name: str, user: str = "") -> dict:
 	return {"status": "ok"}
 
 
+# Caller's `order_by` is resolved through this dict — a key lookup, never
+# string interpolation — so arbitrary SQL can't reach the ORDER BY clause.
+_LIST_SHEETS_ORDER_BY = {
+	"modified": "`tabSheet`.`modified` desc",
+	"title": "`tabSheet`.`title` asc",
+	"owner": "`tabSheet`.`owner` asc, `tabSheet`.`modified` desc",
+}
+
+
 @frappe.whitelist()
-def list_sheets() -> list:
-	# No explicit owner filter — Frappe's get_list already applies the
-	# permission query, so this returns sheets the session user owns plus
-	# those reaching them via DocShare (per-user or everyone=1). The
-	# `owner` field is included so the UI can mark non-owned rows as
-	# "Shared with you", and `is_owner` is computed here because the SPA
-	# template doesn't inject window.frappe.session — the client has no
-	# reliable way to know who it is.
+def list_sheets(
+	start: int = 0,
+	limit: int = 50,
+	search: str = "",
+	owner_filter: str = "all",
+	order_by: str = "modified",
+) -> dict:
+	# Frappe's get_list applies the permission query, so the base result is
+	# sheets the session user owns plus those shared via DocShare (per-user
+	# or everyone=1). `owner_filter` narrows within that visible set:
+	# "mine" / "shared" split on ownership, anything else means "all".
+	# `is_owner` is computed here because the SPA template doesn't inject
+	# window.frappe.session — the client can't know who it is on its own.
 	me = frappe.session.user
+	start = max(frappe.utils.cint(start), 0)
+	limit = min(max(frappe.utils.cint(limit) or 50, 1), 100)
+
+	filters = {"trashed": 0}
+	search = (search or "").strip()
+	if search:
+		filters["title"] = ["like", f"%{search}%"]
+	if owner_filter == "mine":
+		filters["owner"] = me
+	elif owner_filter == "shared":
+		filters["owner"] = ["!=", me]
+
 	rows = frappe.get_list(
 		"Sheet",
-		filters={"trashed": 0},
+		filters=filters,
 		fields=["name", "title", "modified", "owner", "is_public"],
-		order_by="modified desc",
-		limit=100,
+		order_by=_LIST_SHEETS_ORDER_BY.get(order_by, _LIST_SHEETS_ORDER_BY["modified"]),
+		limit_start=start,
+		limit_page_length=limit,
 	)
 	for r in rows:
 		r["is_owner"] = (r["owner"] == me)
 		r["is_public"] = bool(r.get("is_public"))
-	return rows
+
+	# Permission-aware total for the same filters — an aggregate get_list
+	# keeps the owner + DocShare conditions that frappe.db.count would drop.
+	# Dict field syntax: Frappe 17 rejects string SQL functions in SELECT.
+	total = frappe.get_list(
+		"Sheet",
+		filters=filters,
+		fields=[{"COUNT": "*", "as": "total"}],
+	)[0]["total"]
+	return {"sheets": rows, "total": total}
 
 
 @frappe.whitelist(allow_guest=True)
