@@ -1501,6 +1501,7 @@ const history = createHistory({
     if (op.beforeRows)       _applyAxisFormatMap('row', op.beforeRows, op.subSheet)
     if (op.beforeValidation) _applyValidationMap(op.beforeValidation, op.subSheet)
     if (op.beforeMerge)      { merge.restore(op.beforeMerge); grid?.render?.() }
+    if (op.beforeRowH)       _applyRowHeightMap(op.beforeRowH, op.subSheet)
   },
   applyOp(op) {
     // Structural op: redo of "add sheet" recreates the same empty sheet.
@@ -1511,6 +1512,7 @@ const history = createHistory({
     if (op.afterRows)       _applyAxisFormatMap('row', op.afterRows, op.subSheet)
     if (op.afterValidation) _applyValidationMap(op.afterValidation, op.subSheet)
     if (op.afterMerge)      { merge.restore(op.afterMerge); grid?.render?.() }
+    if (op.afterRowH)       _applyRowHeightMap(op.afterRowH, op.subSheet)
   },
   getLocalTouches: () => _drainCollabLocalTouches(),
 })
@@ -1579,6 +1581,14 @@ function _applyValidationMap(map, sheetName) {
   // Validation only affects the dropdown-arrow indicator the canvas
   // paints from getValidation each render — next paint picks it up.
   grid?.render?.()
+}
+
+// Apply a {row: height} diff from a multi-line-edit op. Row heights are
+// canvas view state scoped to the current sheet, so cross-sheet undo skips
+// them rather than resizing the wrong sheet's rows.
+function _applyRowHeightMap(map, sheetName) {
+  if ((sheetName || sheet.getCurrentSheet()) !== sheet.getCurrentSheet()) return
+  for (const [r, h] of Object.entries(map)) grid?.setRowHeight?.(+r, h)
 }
 
 // Forward-declaration: `useCollaboration` (further down the script) sets
@@ -3187,6 +3197,19 @@ function _setupGridInstance() {
         // ~750 ms (deep-clone every engine) → ~10 µs (push the op object).
         const op = { opType: 'edit', subSheet: writeSheet,
                      cellRefs: [id], before: { [id]: before }, after: { [id]: value } }
+        // Multi-line value (Cmd+Enter) auto-grows its row like Google Sheets.
+        // The height diff rides the history op so undo/redo restores it;
+        // _queueOp destructures only the known keys, so server sync is
+        // unaffected. Row heights live in the current sheet's canvas view,
+        // hence the writeSheet guard.
+        if (writeSheet === sheet.getCurrentSheet()) {
+          const p = parseCellId(id)
+          const grow = p && grid?.autoGrowRowFor?.(p.row, value)
+          if (grow) {
+            op.beforeRowH = { [p.row]: grow.before }
+            op.afterRowH  = { [p.row]: grow.after }
+          }
+        }
         _queueOp(op)
         history.pushOp(op)
         broadcastCellChange(writeSheet, id, value)

@@ -125,8 +125,11 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     const iconInset  = condFmt?.icon ? ICON_INSET : 0
     _setCellFont(efmt)
     const mode = getTextWrap(efmt)
-    if (mode === 'wrap') {
-      _drawWrappedText(s, x + iconInset, y, w - iconInset, h, efmt, rightInset)
+    // A value with hard newlines (Cmd+Enter) always renders multi-line, even
+    // in clip/overflow mode — matching Sheets, where only wrap mode also
+    // soft-wraps long lines.
+    if (mode === 'wrap' || s.includes('\n')) {
+      _drawWrappedText(s, x + iconInset, y, w - iconInset, h, efmt, rightInset, mode === 'wrap')
       return
     }
     let drawX = x + iconInset
@@ -530,9 +533,9 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
 
   // ── Wrapped text ─────────────────────────────────────────────────────────────
 
-  function _drawWrappedText(val, x, y, w, h, fmt, rightInset = 0) {
+  function _drawWrappedText(val, x, y, w, h, fmt, rightInset = 0, softWrap = true) {
     const innerW = w - rightInset
-    const lines = _wrapLines(val, innerW - 8)
+    const lines = softWrap ? _wrapLines(val, innerW - 8) : val.split('\n')
     if (!lines.length) return
     const lineH  = 16
     const totalH = lines.length * lineH
@@ -549,8 +552,13 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
     ctx.restore()
   }
 
+  // Hard newlines always break; each paragraph then soft-wraps to fit.
   function _wrapLines(val, maxW) {
-    const tokens = val.split(/(\s+)/)
+    return val.split('\n').flatMap(par => _wrapParagraph(par, maxW))
+  }
+
+  function _wrapParagraph(par, maxW) {
+    const tokens = par.split(/(\s+)/)
     const lines  = []
     let line = ''
     for (const tok of tokens) {
@@ -567,7 +575,7 @@ export function createCellPainter(ctx, { cw, rh, colX, rowY }) {
       }
     }
     if (line.trim()) lines.push(line.trimEnd())
-    return lines
+    return lines.length ? lines : ['']   // keep blank lines from \n\n
   }
 
   // ── Cell borders ─────────────────────────────────────────────────────────────

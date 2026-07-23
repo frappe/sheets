@@ -838,6 +838,20 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     onCommit?.(id, val)
   }
 
+  // A committed value with hard newlines (Cmd+Enter) grows the row so every
+  // line is visible — Google Sheets behavior. Grow-only (never shrinks a row
+  // the user sized). Called by the host on commit; returns the {before,
+  // after} height diff so it can ride the undo op, or null when no growth.
+  function autoGrowRowFor(r, val) {
+    if (typeof val !== 'string' || val.startsWith('=') || !val.includes('\n')) return null
+    const needed = Math.min(400, val.split('\n').length * 16 + 8)
+    const before = rowH[r] ?? DEFAULT_ROW_H
+    if (needed <= before) return null
+    rowH[r] = needed
+    _applyCanvasSize()
+    return { before, after: needed }
+  }
+
   overlay.el.addEventListener('input', () => {
     const val = overlay.getValue()
     onInput?.(cellId(sel.r, sel.c), val)
@@ -908,6 +922,14 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     if (e.key === 'Enter') {
       e.preventDefault()
       if (pickerKb) _pickerKbCommit()
+      // Cmd/Ctrl/Alt+Enter: newline inside the cell (Google Sheets), not commit.
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        const { selectionStart: s0, selectionEnd: s1, value } = overlay.el
+        overlay.el.value = value.slice(0, s0) + '\n' + value.slice(s1)
+        overlay.el.setSelectionRange(s0 + 1, s0 + 1)
+        overlay.el.dispatchEvent(new Event('input', { bubbles: true }))
+        return
+      }
       _commitAndHide()
       const anchorC = _tabAnchorCol ?? sel.c
       _tabAnchorCol = null
@@ -1863,7 +1885,7 @@ export function createGrid(canvas, { onSelect, onCommit, onInput, onCancel, getF
     getCellRect: (r, c) => ({ x: geo.colX(c) * _zoom, y: geo.rowY(r) * _zoom,
                               width: geo.cw(c) * _zoom, height: geo.rh(r) * _zoom }),
     setDiffOverlay, setActiveDiffSheet,
-    autoFitCol, autoFitRow,
+    autoFitCol, autoFitRow, autoGrowRowFor,
     expandRows, getTotalRows, isNearBottom,
     expandCols, getTotalCols,
     setZoom, getZoom,
