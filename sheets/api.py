@@ -378,6 +378,10 @@ def get_sheet(name: str, compressed: int = 0) -> dict:
 		"is_public": is_public,
 		"public_write": bool(access.get("public_write")),
 		"can_write": can_write,
+		# The sheet's true creator, so the Share dialog can label the owner row
+		# with the real person (and "Owner (you)" only for them) instead of
+		# falling back to whoever happens to have the dialog open.
+		"owner": doc.owner,
 	}
 
 

@@ -849,7 +849,7 @@
       v-model="shareOpen"
       :sheet-id="props.id"
       :sheet-title="currentTitle"
-      :owner-id="userEmail"
+      :owner-id="sheetOwner || userEmail"
       :is-public="isPublic"
       :is-public-write="isPublicWrite"
       @shares-changed="shareCount = $event"
@@ -2405,7 +2405,7 @@ const textWrapDropdownOptions = computed(() => [
 // fallbacks only cover the impossible window where someone saves before
 // useSheetTabs has finished initializing.
 let _sheetTabs = null
-const { isSaving, saveError, canWrite, isPublic, isPublicWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
+const { isSaving, saveError, canWrite, isPublic, isPublicWrite, sheetOwner, loadError, loadSheet, autoCreate, saveExisting, retrySave } =
   usePersistence({
     sheet, formats, merge, comments, validation, protection, condFormat, sortFilter, slicers, pivot,
     charts, namedRanges,

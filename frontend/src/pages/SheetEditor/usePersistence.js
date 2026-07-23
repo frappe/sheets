@@ -21,6 +21,11 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
   const canWrite = ref(true)
   const isPublic = ref(false)
   const isPublicWrite = ref(false)
+  // The sheet's true owner (creator's user id), surfaced by get_sheet so the
+  // Share dialog can name the real owner rather than the current viewer. Empty
+  // until the first load resolves; for a brand-new sheet the editor falls back
+  // to the session user (who is the creator).
+  const sheetOwner = ref('')
 
   async function loadSheet(name) {
     loadError.value = null
@@ -53,6 +58,7 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
       canWrite.value = doc.can_write !== false
       isPublic.value = !!doc.is_public
       isPublicWrite.value = !!doc.public_write
+      sheetOwner.value = doc.owner || ''
     } catch (err) {
       console.error('Load failed:', err)
       const t = err?.excType || ''
@@ -189,5 +195,5 @@ export function usePersistence({ sheet, formats, merge, comments, validation, pr
     }
   }
 
-  return { isSaving, saveError, canWrite, isPublic, isPublicWrite, loadError, loadSheet, autoCreate, saveExisting, retrySave }
+  return { isSaving, saveError, canWrite, isPublic, isPublicWrite, sheetOwner, loadError, loadSheet, autoCreate, saveExisting, retrySave }
 }
