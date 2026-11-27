@@ -1,5 +1,9 @@
 # Frappe Sheets
 
+> [!IMPORTANT]
+> Sheets is now merged into [Frappe Suite](https://github.com/frappe/suite).
+> New development happens there. This repository is not maintained.
+
 A spreadsheet app for Frappe — Google-Sheets-style grid built with Vue 3 and
 HTML Canvas. Designed to fit the Espresso design system used across the rest
 of the Frappe product family.
